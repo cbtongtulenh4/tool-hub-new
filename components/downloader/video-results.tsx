@@ -9,7 +9,7 @@ interface VideoItem {
   caption: string
   comments: number
   likes: string
-  views: string
+  collects: string
   shares: number
   status: string
 }
@@ -56,7 +56,7 @@ export function VideoResults({
 
   const [showFilter, setShowFilter] = useState(false)
   const [filters, setFilters] = useState({
-    views: "",
+    collects: "",
     likes: "",
     comments: "",
     shares: "",
@@ -65,24 +65,38 @@ export function VideoResults({
   // Filter logic
   const filteredVideos = useMemo(() => {
     return videos.filter(video => {
-      const views = parseMetric(video.views)
+      const collects = parseMetric(video.collects)
       const likes = parseMetric(video.likes)
       const comments = parseMetric(video.comments)
       const shares = parseMetric(video.shares)
 
-      const minViews = filters.views ? parseMetric(filters.views) : 0
+      const minCollects = filters.collects ? parseMetric(filters.collects) : 0
       const minLikes = filters.likes ? parseMetric(filters.likes) : 0
       const minComments = filters.comments ? parseMetric(filters.comments) : 0
       const minShares = filters.shares ? parseMetric(filters.shares) : 0
 
       return (
-        views >= minViews &&
+        collects >= minCollects &&
         likes >= minLikes &&
         comments >= minComments &&
         shares >= minShares
       )
     })
   }, [videos, filters])
+
+  // Auto-scroll to latest video when new data arrives
+  useEffect(() => {
+    if (!isLoading && videos.length > 0) {
+      const lastVideoId = videos[videos.length - 1].id
+      const lastRow = rowRefs.current[lastVideoId]
+      if (lastRow && tableRef.current) {
+        lastRow.scrollIntoView({
+          behavior: "smooth",
+          block: "end",
+        })
+      }
+    }
+  }, [videos.length, isLoading])
 
   useEffect(() => {
     if (isDownloading && currentDownloadingIds.length > 0) {
@@ -138,9 +152,9 @@ export function VideoResults({
   return (
     <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden transition-all duration-500 flex-1 flex flex-col min-h-0 shadow-xl">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0 bg-white/5">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 shrink-0 bg-white/5">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-4 bg-gradient-to-r from-red-500 to-orange-500 rounded flex items-center justify-center shadow-lg shadow-orange-500/20">
+          <div className="w-8 h-5 bg-gradient-to-r from-red-500 to-orange-500 rounded flex items-center justify-center shadow-lg shadow-orange-500/20">
             <span className="text-[10px] font-bold text-white">PLAY</span>
           </div>
           <span className="font-medium bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Kết quả video</span>
@@ -152,9 +166,9 @@ export function VideoResults({
         </div>
         <button
           onClick={() => setShowFilter(!showFilter)}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all duration-300 border ${showFilter
-              ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/50"
-              : "bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/5 hover:border-white/20"
+          className={`cursor-pointer flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all duration-300 border ${showFilter
+            ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/50"
+            : "bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/5 hover:border-white/20"
             }`}
         >
           {showFilter ? <X className="w-3.5 h-3.5" /> : <Filter className="w-3.5 h-3.5" />}
@@ -171,9 +185,9 @@ export function VideoResults({
             </div>
             <input
               type="text"
-              placeholder="Min Views (e.g. 10K)"
-              value={filters.views}
-              onChange={(e) => setFilters(prev => ({ ...prev, views: e.target.value }))}
+              placeholder="Min Collects"
+              value={filters.collects}
+              onChange={(e) => setFilters(prev => ({ ...prev, collects: e.target.value }))}
               className="w-full bg-black/20 border border-white/10 rounded-lg py-1.5 pl-8 pr-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50 focus:bg-black/40 transition-all font-mono"
             />
           </div>
@@ -247,7 +261,7 @@ export function VideoResults({
             <p className="text-sm font-medium text-gray-400">Không tìm thấy video nào</p>
             <p className="text-xs mt-1 opacity-60">Thử điều chỉnh bộ lọc của bạn</p>
             <button
-              onClick={() => setFilters({ views: "", likes: "", comments: "", shares: "" })}
+              onClick={() => setFilters({ collects: "", likes: "", comments: "", shares: "" })}
               className="mt-3 px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors"
             >
               Xóa bộ lọc
@@ -263,7 +277,7 @@ export function VideoResults({
                 <th className="px-4 py-3 font-medium">Caption</th>
                 <th className="px-4 py-3 font-medium text-center">Cmt</th>
                 <th className="px-4 py-3 font-medium text-center">Like</th>
-                <th className="px-4 py-3 font-medium text-center">View</th>
+                <th className="px-4 py-3 font-medium text-center">Collect</th>
                 <th className="px-4 py-3 font-medium text-center">Share</th>
                 <th className="px-4 py-3 font-medium text-center">Status</th>
               </tr>
@@ -284,7 +298,7 @@ export function VideoResults({
                     <button
                       onClick={() => toggleVideo(video.id)}
                       disabled={isDownloading}
-                      className={`w-5 h-5 rounded border flex items-center justify-center transition-all duration-300 transform group-hover:scale-110 disabled:opacity-50 mx-auto ${selectedVideos.includes(video.id)
+                      className={`cursor-pointer w-5 h-5 rounded border flex items-center justify-center transition-all duration-300 transform group-hover:scale-110 disabled:opacity-50 mx-auto ${selectedVideos.includes(video.id)
                         ? "bg-cyan-500 border-cyan-500 shadow-lg shadow-cyan-500/30"
                         : "border-gray-600 bg-transparent group-hover:border-cyan-400 text-transparent hover:text-cyan-400/50"
                         }`}
@@ -311,18 +325,18 @@ export function VideoResults({
                     {video.likes}
                   </td>
                   <td className="px-4 py-3 text-center text-blue-400 text-xs">
-                    {video.views}
+                    {video.collects}
                   </td>
                   <td className="px-4 py-3 text-center text-green-400 text-xs">
                     {video.shares}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${video.status.includes("Hoàn thành") ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                      video.status.includes("Đang") ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20 animate-pulse" :
-                        video.status.includes("Đã dừng") ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${(video.status || "").includes("Hoàn thành") ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                      (video.status || "").includes("Đang") ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20 animate-pulse" :
+                        (video.status || "").includes("Đã dừng") ? "bg-red-500/10 text-red-400 border-red-500/20" :
                           "bg-gray-500/10 text-gray-400 border-gray-500/20"
                       }`}>
-                      {video.status}
+                      {video.status || "Sẵn sàng"}
                     </span>
                   </td>
                 </tr>
@@ -333,9 +347,9 @@ export function VideoResults({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between px-4 py-3 border-t border-white/10 shrink-0 bg-white/5 text-xs">
+      <div className="flex items-center justify-between px-4 py-2 border-t border-white/10 shrink-0 bg-white/5 text-xs">
         <div className="flex items-center gap-2 text-gray-400">
-          {showFilter && (filters.views || filters.likes || filters.comments || filters.shares) ? (
+          {showFilter && (filters.collects || filters.likes || filters.comments || filters.shares) ? (
             <span>Đang lọc: <span className="text-white font-medium">{filteredVideos.length}</span> / {videos.length} video</span>
           ) : (
             <span>Tổng: <span className="text-white font-medium">{videos.length}</span> video</span>
@@ -345,7 +359,7 @@ export function VideoResults({
           <button
             onClick={toggleAll}
             disabled={!isDataFetched || isDownloading || filteredVideos.length === 0}
-            className="flex items-center gap-2 text-gray-400 hover:text-cyan-400 transition-all duration-300 disabled:opacity-50 hover:bg-white/5 px-2 py-1 rounded-lg"
+            className="cursor-pointer flex items-center gap-2 text-gray-400 hover:text-cyan-400 transition-all duration-300 disabled:opacity-50 hover:bg-white/5 px-2 py-1 rounded-lg"
           >
             <CheckSquare className="w-4 h-4" />
             <span>{visibleSelectedCount === filteredVideos.length && filteredVideos.length > 0 ? "Bỏ chọn" : "Chọn tất cả"}</span>

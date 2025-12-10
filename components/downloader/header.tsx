@@ -8,7 +8,7 @@ export function Header() {
 
   return (
     <header className="flex items-center justify-between px-6 py-4 relative z-20">
-      <div className="flex items-center gap-3 backdrop-blur-md bg-white/5 border border-white/10 p-2 rounded-2xl shadow-lg transition-transform hover:scale-[1.02]">
+      <div className="flex items-center gap-3 backdrop-blur-md hover:scale-[1.02]">
         <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/30">
           <Download className="w-6 h-6 text-white" />
         </div>

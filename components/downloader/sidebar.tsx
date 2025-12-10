@@ -118,7 +118,7 @@ export function Sidebar({
             <button
               onClick={onStartFromUrls}
               disabled={isLoading || !urlListText.trim()}
-              className="w-full relative overflow-hidden group flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-600 to-blue-600 disabled:from-gray-700 disabled:to-gray-800 text-white px-4 py-3 rounded-lg transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20 active:scale-95 disabled:active:scale-100"
+              className="cursor-pointer w-full relative overflow-hidden group flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-600 to-blue-600 disabled:from-gray-700 disabled:to-gray-800 text-white px-4 py-3 rounded-lg transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20 active:scale-95 disabled:active:scale-100"
             >
               <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
               {isLoading ? (
@@ -135,8 +135,8 @@ export function Sidebar({
             </button>
             <button
               onClick={onStop}
-              disabled={!isLoading}
-              className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 disabled:hover:bg-red-500/10"
+              disabled={true}//{!isLoading}
+              className="cursor-pointer w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 disabled:hover:bg-red-500/10"
             >
               <StopCircle className="w-4 h-4" />
               <span className="text-sm font-medium">Dừng get video</span>
@@ -205,7 +205,7 @@ export function Sidebar({
           <button
             onClick={onStart}
             disabled={isLoading}
-            className="w-full relative overflow-hidden group flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-600 to-blue-600 disabled:from-gray-700 disabled:to-gray-800 text-white px-4 py-3 rounded-lg transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20 active:scale-95 disabled:active:scale-100"
+            className="cursor-pointer w-full relative overflow-hidden group flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-600 to-blue-600 disabled:from-gray-700 disabled:to-gray-800 text-white px-4 py-3 rounded-lg transition-all duration-300 hover:shadow-lg hover:shadow-cyan-500/20 active:scale-95 disabled:active:scale-100"
           >
             <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
             {isLoading ? (
@@ -222,8 +222,8 @@ export function Sidebar({
           </button>
           <button
             onClick={onStop}
-            disabled={!isLoading}
-            className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 disabled:hover:bg-red-500/10"
+            disabled={true}//{!isLoading}
+            className="cursor-pointer w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-4 py-3 rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 disabled:hover:bg-red-500/10"
           >
             <StopCircle className="w-4 h-4" />
             <span className="text-sm font-medium">Dừng get video</span>

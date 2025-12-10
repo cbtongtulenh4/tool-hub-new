@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { Outfit, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
+import { Toaster } from "sonner"
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -46,6 +47,7 @@ export default function RootLayout({
     <html lang="vi">
       <body className={`${outfit.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         {children}
+        <Toaster />
         <Analytics />
       </body>
     </html>

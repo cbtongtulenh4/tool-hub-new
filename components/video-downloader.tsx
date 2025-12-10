@@ -5,7 +5,7 @@ import { Header } from "./downloader/header"
 import { Sidebar } from "./downloader/sidebar"
 import { VideoResults } from "./downloader/video-results"
 import { DownloadOptions } from "./downloader/download-options"
-
+import { useToast } from '@/hooks/use-toast'
 interface VideoItem {
   id: number
   url: string
@@ -16,13 +16,10 @@ interface VideoItem {
   shares: number
   status: string
 }
-
-
-
 export function VideoDownloader() {
   const [activeTab, setActiveTab] = useState<"channel" | "url">("channel")
   const [selectedPlatform, setSelectedPlatform] = useState("tiktok")
-  const [channelUrl, setChannelUrl] = useState("https://www.tiktok.com/@sinhnovas")
+  const [channelUrl, setChannelUrl] = useState("paste link user here")
   const [selectedVideos, setSelectedVideos] = useState<number[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isDataFetched, setIsDataFetched] = useState(false)
@@ -33,27 +30,53 @@ export function VideoDownloader() {
   const [totalDownloadCount, setTotalDownloadCount] = useState(0)
   const [urlListText, setUrlListText] = useState("")
   const [concurrentDownloads, setConcurrentDownloads] = useState(5)
+  const { toast } = useToast()
 
   const handleStartFetch = async () => {
-    setIsLoading(true)
+    // Reset state before fetching
+    setVideos([]);
+    setIsDataFetched(false);
+    setIsLoading(true);
+
     try {
-      const response = await fetch("http://localhost:5000/api/videos/list", {
+      const response = await fetch("/api/videos/user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: channelUrl }),
+        body: JSON.stringify({ channel_url: channelUrl }),
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        setVideos(data.videos)
-        setIsDataFetched(true)
-      } else {
-        console.error("Failed to fetch videos")
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let isFirstChunk = true;
+
+      while (true) {
+        const { done, value } = await reader!.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const items = chunk.split('\n').filter(line => line.trim());
+
+        // Update all items from this chunk at once to avoid React batching issues
+        if (items.length > 0) {
+          // Backend now sends arrays of videos, so we need to flatten them
+          const newVideos = items.flatMap(item => {
+            const parsed = JSON.parse(item);
+            // If parsed is an array, return it as-is; if single object, wrap in array
+            return Array.isArray(parsed) ? parsed : [parsed];
+          });
+          setVideos(prev => [...prev, ...newVideos]);
+
+          // Set isDataFetched to true on first chunk so table renders immediately
+          if (isFirstChunk) {
+            setIsLoading(false)
+            setIsDataFetched(true);
+            isFirstChunk = false;
+          }
+        }
       }
     } catch (error) {
       console.error("Error fetching videos:", error)
     } finally {
-      setIsLoading(false)
+
     }
   }
 
@@ -61,7 +84,7 @@ export function VideoDownloader() {
     if (!urlListText.trim()) return
     setIsLoading(true)
     try {
-      const response = await fetch("http://localhost:5000/api/load_info_from_videos", {
+      const response = await fetch("/api/videos/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls: urlListText }),
@@ -83,7 +106,7 @@ export function VideoDownloader() {
 
   const handleStopFetch = async () => {
     try {
-      await fetch("http://localhost:5000/api/load_list_user_videos/stop", { method: "POST" })
+      await fetch("/api/videos/stop", { method: "POST" })
     } catch (error) {
       console.error("Error stopping fetch:", error)
     }
@@ -98,45 +121,156 @@ export function VideoDownloader() {
     setTotalDownloadCount(0)
   }
 
-  const handleStartDownload = async () => {
+  const handleStartDownload = async (settings: {
+    savePath: string
+    quality: string
+    videoFormat: string
+    audioFormat: string
+    videoEnabled: boolean
+    audioEnabled: boolean
+    concurrentDownloads: number
+  }) => {
     if (selectedVideos.length === 0) return
 
     setIsDownloading(true)
     setTotalDownloadCount(selectedVideos.length)
     setDownloadedCount(0)
 
-    const queue = [...selectedVideos]
-    let completed = 0
+    // Get URLs of selected videos, excluding already completed ones
+    const selectedVideoUrls = videos
+      .filter(v => selectedVideos.includes(v.id))
+      .filter(v => !v.status.includes('Hoàn thành'))  // Skip completed videos
+      .map(v => v.url)
 
-    const downloadVideo = async (videoId: number): Promise<void> => {
-      setCurrentDownloadingIds((prev) => [...prev, videoId])
+    // Deduplicate URLs to avoid downloading same video multiple times
+    const uniqueUrls = [...new Set(selectedVideoUrls)]
 
-      setVideos((prev) => prev.map((v) => (v.id === videoId ? { ...v, status: "Đang tải..." } : v)))
-      await new Promise((resolve) => setTimeout(resolve, 300))
+    console.log('Selected video IDs:', selectedVideos)
+    console.log('Selected video URLs (with duplicates):', selectedVideoUrls)
+    console.log('Unique URLs to download:', uniqueUrls)
+    console.log('Total videos in list:', videos.length)
 
-      const totalTime = 2000 + Math.random() * 3000
-      const steps = 5
-      const stepTime = totalTime / steps
+    if (uniqueUrls.length === 0) {
+      toast({
+        title: "Không có video nào cần tải",
+        description: "Tất cả videos đã chọn đều đã được tải xuống",
+        variant: "default",
+      })
+      return
+    }
 
-      for (let i = 1; i <= steps; i++) {
-        const progress = Math.floor((i / steps) * 100)
-        setVideos((prev) => prev.map((v) => (v.id === videoId ? { ...v, status: `Tải ${progress}%` } : v)))
-        await new Promise((resolve) => setTimeout(resolve, stepTime))
+    try {
+      // Call the download API
+      const response = await fetch("/api/videos/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          video_urls: uniqueUrls,  // Use deduplicated URLs
+          save_path: settings.savePath,
+          quality: settings.quality,
+          video_format: settings.videoFormat,
+          audio_format: settings.audioFormat,
+          video_enabled: settings.videoEnabled,
+          audio_enabled: settings.audioEnabled,
+          concurrent_downloads: settings.concurrentDownloads,
+        }),
+      })
+
+      if (!response.ok) {
+        toast({
+          title: "Lỗi",
+          description: "Không thể bắt đầu tải xuống",
+          variant: "destructive",
+        })
+        setIsDownloading(false)
+        return
       }
 
-      setVideos((prev) => prev.map((v) => (v.id === videoId ? { ...v, status: "Hoàn thành ✓" } : v)))
-      setCurrentDownloadingIds((prev) => prev.filter((id) => id !== videoId))
-      completed++
-      setDownloadedCount(completed)
-    }
+      const data = await response.json()
+      const downloadId = data.download_id
 
-    while (queue.length > 0) {
-      const batch = queue.splice(0, concurrentDownloads)
-      await Promise.all(batch.map((videoId) => downloadVideo(videoId)))
-    }
+      toast({
+        title: "Đã bắt đầu tải xuống",
+        description: `Đang tải ${selectedVideos.length} video`,
+      })
 
-    setIsDownloading(false)
-    setCurrentDownloadingIds([])
+      // Update initial status
+      setVideos((prev) =>
+        prev.map((v) =>
+          selectedVideos.includes(v.id) ? { ...v, status: "Đang tải..." } : v
+        )
+      )
+
+      // Connect to SSE for progress updates
+      const eventSource = new EventSource(`/api/videos/download/progress?id=${downloadId}`)
+
+      eventSource.onmessage = (event) => {
+        try {
+          const progressData = JSON.parse(event.data)
+
+          if (progressData.type === 'started') {
+            console.log('Download started:', progressData)
+          } else if (progressData.type === 'progress') {
+            console.log('Progress update for URL:', progressData.url, 'Status:', progressData.status)
+            // Update specific video status - only for selected videos with matching URL
+            setVideos((prev) =>
+              prev.map((v) =>
+                v.url === progressData.url && selectedVideos.includes(v.id)
+                  ? {
+                    ...v,
+                    status: progressData.status === 'success'
+                      ? 'Hoàn thành ✓'
+                      : `Lỗi: ${progressData.message || 'Unknown error'}`
+                  }
+                  : v
+              )
+            )
+            setDownloadedCount(progressData.completed)
+          } else if (progressData.type === 'completed') {
+            eventSource.close()
+            setIsDownloading(false)
+            setCurrentDownloadingIds([])
+            toast({
+              title: "Hoàn thành",
+              description: `Đã tải xong ${progressData.completed}/${progressData.total} video`,
+            })
+          } else if (progressData.type === 'error') {
+            eventSource.close()
+            setIsDownloading(false)
+            setCurrentDownloadingIds([])
+            toast({
+              title: "Lỗi",
+              description: progressData.error || "Có lỗi xảy ra",
+              variant: "destructive",
+            })
+          }
+        } catch (err) {
+          console.error('Error parsing SSE data:', err)
+        }
+      }
+
+      eventSource.onerror = (error) => {
+        console.error('SSE Error:', error)
+        eventSource.close()
+        setIsDownloading(false)
+        setCurrentDownloadingIds([])
+        toast({
+          title: "Lỗi kết nối",
+          description: "Mất kết nối với server",
+          variant: "destructive",
+        })
+      }
+
+    } catch (error) {
+      console.error("Error downloading videos:", error)
+      toast({
+        title: "Lỗi",
+        description: "Có lỗi xảy ra khi tải xuống",
+        variant: "destructive",
+      })
+      setIsDownloading(false)
+      setCurrentDownloadingIds([])
+    }
   }
 
   const handleStopDownload = () => {
@@ -155,10 +289,10 @@ export function VideoDownloader() {
       <Header />
 
       <div className="flex-1 px-4 py-3 flex flex-col overflow-hidden relative z-10">
-        <div className="flex gap-2 mb-4 shrink-0">
+        <div className="flex gap-2 mb-2 shrink-0">
           <button
             onClick={() => setActiveTab("channel")}
-            className={`relative overflow-hidden px-6 py-2.5 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 active:scale-95 ${activeTab === "channel"
+            className={`cursor-pointer relative overflow-hidden px-3 py-1.5 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 active:scale-95 ${activeTab === "channel"
               ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg shadow-orange-500/30 ring-1 ring-orange-400/50"
               : "bg-white/5 hover:bg-white/10 text-gray-400 backdrop-blur-sm border border-white/5"
               }`}
@@ -170,7 +304,7 @@ export function VideoDownloader() {
           </button>
           <button
             onClick={() => setActiveTab("url")}
-            className={`relative overflow-hidden px-6 py-2.5 rounded-xl font-medium transition-all duration-300 transform hover:scale-105 active:scale-95 ${activeTab === "url"
+            className={`cursor-pointer relative overflow-hidden px-3 py-1.5 rounded-lg font-medium transition-all duration-300 transform hover:scale-105 active:scale-95 ${activeTab === "url"
               ? "bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg shadow-orange-500/30 ring-1 ring-orange-400/50"
               : "bg-white/5 hover:bg-white/10 text-gray-400 backdrop-blur-sm border border-white/5"
               }`}
