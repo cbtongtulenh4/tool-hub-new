@@ -53,7 +53,6 @@ export function VideoResults({
 }: VideoResultsProps) {
   const tableRef = useRef<HTMLDivElement>(null)
   const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({})
-
   const [showFilter, setShowFilter] = useState(false)
   const [filters, setFilters] = useState({
     collects: "",
@@ -61,6 +60,7 @@ export function VideoResults({
     comments: "",
     shares: "",
   })
+  const isVideoError = (status: string) => { return status?.includes("Error") || status?.includes("Failed"); }
 
   // Filter logic
   const filteredVideos = useMemo(() => {
@@ -112,6 +112,8 @@ export function VideoResults({
   }, [currentDownloadingIds, isDownloading])
 
   const toggleVideo = (id: number) => {
+    const video = videos.find(v => v.id === id);
+    if (video && isVideoError(video.status)) return;
     if (selectedVideos.includes(id)) {
       setSelectedVideos(selectedVideos.filter((v) => v !== id))
     } else {
@@ -121,7 +123,7 @@ export function VideoResults({
 
   const toggleAll = () => {
     // Only toggle visible/filtered videos
-    const visibleIds = filteredVideos.map(v => v.id)
+    const visibleIds = filteredVideos.filter(v => !isVideoError(v.status)).map(v => v.id);
     const allVisibleSelected = visibleIds.every(id => selectedVideos.includes(id))
 
     if (allVisibleSelected) {
@@ -289,7 +291,7 @@ export function VideoResults({
                   ref={(el) => {
                     rowRefs.current[video.id] = el
                   }}
-                  className={`group transition-all duration-300 animate-slide-in ${isVideoDownloading(video.id) ? "bg-cyan-500/10" : "hover:bg-white/5"
+                  className={`group transition-all duration-300 animate-slide-in ${isVideoError(video.status) ? "bg-gray-900/50 text-gray-500 opacity-60" : isVideoDownloading(video.id) ? "bg-cyan-500/10" : "hover:bg-white/5"
                     }`}
                   style={{ animationDelay: `${index * 30}ms` }}
                 >
@@ -297,8 +299,8 @@ export function VideoResults({
                   <td className="px-4 py-3 text-center">
                     <button
                       onClick={() => toggleVideo(video.id)}
-                      disabled={isDownloading}
-                      className={`cursor-pointer w-5 h-5 rounded border flex items-center justify-center transition-all duration-300 transform group-hover:scale-110 disabled:opacity-50 mx-auto ${selectedVideos.includes(video.id)
+                      disabled={isDownloading || isVideoError(video.status)}
+                      className={`cursor-pointer w-5 h-5 rounded border flex items-center justify-center transition-all duration-300 transform group-hover:scale-110 disabled:opacity-50 mx-auto ${isVideoError(video.status) ? "bg-red-500/20 border-red-500/50 cursor-not-allowed" : selectedVideos.includes(video.id)
                         ? "bg-cyan-500 border-cyan-500 shadow-lg shadow-cyan-500/30"
                         : "border-gray-600 bg-transparent group-hover:border-cyan-400 text-transparent hover:text-cyan-400/50"
                         }`}
@@ -308,7 +310,9 @@ export function VideoResults({
                   </td>
                   <td className="px-4 py-3 max-w-[200px]">
                     <a
-                      href="#"
+                      href={video.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       title={video.url}
                       className="text-cyan-400 hover:text-cyan-300 truncate block transition-colors duration-300 text-xs font-mono bg-cyan-500/10 px-2 py-1 rounded border border-cyan-500/20"
                     >
@@ -331,7 +335,7 @@ export function VideoResults({
                     {video.shares}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${(video.status || "").includes("Hoàn thành") ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${isVideoError(video.status) ? "bg-red-500/20 text-red-400 border-red-500/30" : (video.status || "").includes("Hoàn thành") ? "bg-green-500/10 text-green-400 border-green-500/20" :
                       (video.status || "").includes("Đang") ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/20 animate-pulse" :
                         (video.status || "").includes("Đã dừng") ? "bg-red-500/10 text-red-400 border-red-500/20" :
                           "bg-gray-500/10 text-gray-400 border-gray-500/20"

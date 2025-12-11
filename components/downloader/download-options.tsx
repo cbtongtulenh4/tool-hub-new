@@ -158,14 +158,14 @@ export function DownloadOptions({
                 <input
                   type="number"
                   value={concurrentDownloads}
-                  onChange={(e) => setConcurrentDownloads(Math.max(1, Math.min(10, Number.parseInt(e.target.value) || 1)))}
+                  onChange={(e) => setConcurrentDownloads(Math.max(1, Math.min(50, Number.parseInt(e.target.value) || 1)))}
                   min={1}
-                  max={10}
+                  max={50}
                   className="flex-1 bg-black/20 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:ring-1 focus:ring-cyan-500/50 transition-all duration-300 text-center font-bold"
                 />
                 <div className="flex flex-col gap-0.5">
                   <button
-                    onClick={() => setConcurrentDownloads(Math.min(10, concurrentDownloads + 1))}
+                    onClick={() => setConcurrentDownloads(Math.min(50, concurrentDownloads + 1))}
                     className="bg-white/5 hover:bg-cyan-500/20 hover:text-cyan-400 p-0.5 rounded transition-all duration-300 active:scale-90"
                   >
                     <ChevronUp className="w-3 h-3" />

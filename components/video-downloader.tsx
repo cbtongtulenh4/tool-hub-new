@@ -19,7 +19,7 @@ interface VideoItem {
 export function VideoDownloader() {
   const [activeTab, setActiveTab] = useState<"channel" | "url">("channel")
   const [selectedPlatform, setSelectedPlatform] = useState("tiktok")
-  const [channelUrl, setChannelUrl] = useState("paste link user here")
+  const [channelUrl, setChannelUrl] = useState("")
   const [selectedVideos, setSelectedVideos] = useState<number[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isDataFetched, setIsDataFetched] = useState(false)
@@ -35,6 +35,7 @@ export function VideoDownloader() {
   const handleStartFetch = async () => {
     // Reset state before fetching
     setVideos([]);
+    setSelectedVideos([]);  // Reset checkbox selections
     setIsDataFetched(false);
     setIsLoading(true);
 
@@ -55,14 +56,21 @@ export function VideoDownloader() {
         const chunk = decoder.decode(value, { stream: true });
         const items = chunk.split('\n').filter(line => line.trim());
 
-        // Update all items from this chunk at once to avoid React batching issues
         if (items.length > 0) {
-          // Backend now sends arrays of videos, so we need to flatten them
+
           const newVideos = items.flatMap(item => {
             const parsed = JSON.parse(item);
-            // If parsed is an array, return it as-is; if single object, wrap in array
             return Array.isArray(parsed) ? parsed : [parsed];
           });
+          if (newVideos[0].error) {
+            toast({
+              title: "Loi",
+              description: newVideos[0].message || "",
+              variant: "destructive"
+            })
+            setIsLoading(false);
+            continue;
+          }
           setVideos(prev => [...prev, ...newVideos]);
 
           // Set isDataFetched to true on first chunk so table renders immediately
@@ -75,14 +83,19 @@ export function VideoDownloader() {
       }
     } catch (error) {
       console.error("Error fetching videos:", error)
-    } finally {
-
     }
   }
 
   const handleStartFetchFromUrls = async () => {
     if (!urlListText.trim()) return
-    setIsLoading(true)
+
+    // Reset state before fetching
+    setVideos([]);
+    setSelectedVideos([]);  // Reset checkbox selections
+    setIsDataFetched(false);
+    setIsLoading(true);
+
+
     try {
       const response = await fetch("/api/videos/list", {
         method: "POST",
@@ -90,17 +103,42 @@ export function VideoDownloader() {
         body: JSON.stringify({ urls: urlListText }),
       })
 
-      if (response.ok) {
-        const data = await response.json()
-        setVideos(data.videos)
-        setIsDataFetched(true)
-      } else {
-        console.error("Failed to fetch videos from URLs")
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let isFirstChunk = true;
+
+      while (true) {
+        const { done, value } = await reader!.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const items = chunk.split('\n').filter(line => line.trim());
+
+        if (items.length > 0) {
+
+          const newVideos = items.flatMap(item => {
+            const parsed = JSON.parse(item);
+            return Array.isArray(parsed) ? parsed : [parsed];
+          });
+          if (newVideos[0].error) {
+            toast({
+              title: "Loi",
+              description: newVideos[0].message || "",
+              variant: "destructive"
+            })
+            setIsLoading(false);
+            continue;
+          }
+          setVideos(prev => [...prev, ...newVideos]);
+
+          if (isFirstChunk) {
+            setIsLoading(false)
+            setIsDataFetched(true);
+            isFirstChunk = false;
+          }
+        }
       }
     } catch (error) {
       console.error("Error fetching videos:", error)
-    } finally {
-      setIsLoading(false)
     }
   }
 

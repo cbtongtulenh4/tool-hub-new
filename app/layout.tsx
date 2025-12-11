@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import { Outfit, JetBrains_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
-import { Toaster } from "sonner"
+import { Toaster } from "@/components/ui/toaster"
 
 const outfit = Outfit({
   subsets: ["latin"],

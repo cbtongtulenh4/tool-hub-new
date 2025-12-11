@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import os
 import re
 from pathlib import Path
@@ -18,6 +19,7 @@ from queue import Queue
 import json
 import time
 import random
+from datetime import datetime
 
 
 app = Flask(__name__, static_folder='static', static_url_path='')
@@ -27,12 +29,12 @@ CORS(app)
 # Create media_download folder if it doesn't exist
 DOWNLOAD_FOLDER = Path("media_download")
 DOWNLOAD_FOLDER.mkdir(exist_ok=True)
-FFMPEG_PATH = "./bin/ffmpeg.exe"
+FFMPEG_PATH = os.path.join(sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__)), "bin", "ffmpeg.exe")
 
 # Global state for download tracking
 download_tasks = {}  # {download_id: {status, videos, progress}}
 download_queues = {}  # {download_id: Queue for SSE events}
-
+playlist_session = []
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to remove invalid characters."""
@@ -90,7 +92,11 @@ def classify_urls(urls: list) -> list:
 
         # ---- YouTube ----
         elif 'youtube.com' in url or 'youtu.be' in url:
-            if url.split("/")[-1].startswith("@"):
+            if "/channel/" in url:
+                result_groups.append([
+                    {'url': url, 'platform': 'youtube', 'type': 'channel'}
+                ])
+            elif url.split("/")[-1].startswith("@"):
                 result_groups.append([
                     {'url': url, 'platform': 'youtube', 'type': 'channel'}
                 ])
@@ -127,7 +133,9 @@ async def download_single_video(item, index: int) -> dict:
             }
 
         if platform == "youtube":
-            YouTubeDownloader(url, DOWNLOAD_FOLDER, 0, FFMPEG_PATH).download_worker(url)
+            # Wrap sync YouTube downloader in async to prevent blocking
+            downloader = YouTubeDownloader(url, item['save_path'], 0, ffmpeg_path=FFMPEG_PATH)
+            await asyncio.to_thread(downloader.download_worker, url)
             return {
                 "url": url,
                 "status": "success",
@@ -137,8 +145,10 @@ async def download_single_video(item, index: int) -> dict:
             }
 
         # Get video info from fsmvid
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [FSMVID START] Getting info for {url}")
         fsmvid = FSMVIDDown()
         result = await fsmvid.download(platform, url)
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [FSMVID DONE] Got info for {url}")
         
         if not result or result.get("status", "") != "success" or result.get("cnt", 0) == 0:
             return {
@@ -176,7 +186,7 @@ async def download_single_video(item, index: int) -> dict:
             if type == "image":
                 extension = video_media.get("extension", "jpg")
                 filename = f"{sanitize_filename(video_id)}.{extension}"
-                filepath = DOWNLOAD_FOLDER / filename
+                filepath = Path(item['save_path']) / filename
                 # Download the image
                 async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
                     async with client.stream("GET", video_url) as response:
@@ -192,22 +202,17 @@ async def download_single_video(item, index: int) -> dict:
                 }
             ext = video_media.get("ext", "mp4")
             filename = f"{sanitize_filename(video_id)}.{ext}"
-            filepath = DOWNLOAD_FOLDER / filename
+            filepath = Path(item['save_path']) / filename
             # Download the video
-            # async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
-            #     async with client.stream("GET", video_url) as response:
-            #         response.raise_for_status()
-            #         with open(filepath, "wb") as f:
-            #             async for chunk in response.aiter_bytes(chunk_size=1024*1024): 
-            #                 f.write(chunk)
-            async with httpx.AsyncClient(timeout=None, follow_redirects=True, http2=True) as client:
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [DOWNLOAD START] {url}")
+            async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
                 async with client.stream("GET", video_url) as response:
                     response.raise_for_status()
 
                     async with aiofiles.open(filepath, "wb") as f:
                         async for chunk in response.aiter_bytes(chunk_size=4 * 1024 * 1024):  # 4MB
                             await f.write(chunk)
-            
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [DOWNLOAD END] {item['url']} downloaded successfully")
             return {
                 "url": url,
                 "status": "success",
@@ -222,7 +227,7 @@ async def download_single_video(item, index: int) -> dict:
             video_url = video_media.get("url")
             ext = video_media.get("ext", "mp4")
             filename = f"{sanitize_filename(video_id)}.{ext}"
-            filepath = DOWNLOAD_FOLDER / filename
+            filepath = Path(item['save_path']) / filename
             async with httpx.AsyncClient(timeout=None, follow_redirects=True, http2=True) as client:
                 async with client.stream("GET", video_url) as response:
                     response.raise_for_status()
@@ -234,7 +239,7 @@ async def download_single_video(item, index: int) -> dict:
             audio_url = audio_media.get("url")
             audio_ext = audio_media.get("ext", "mp3")
             audio_filename = f"{sanitize_filename(video_id)}.{audio_ext}"
-            audio_filepath = DOWNLOAD_FOLDER / audio_filename
+            audio_filepath = Path(item['save_path']) / audio_filename
             async with httpx.AsyncClient(timeout=None, follow_redirects=True, http2=True) as client:
                 async with client.stream("GET", audio_url) as response:
                     response.raise_for_status()
@@ -246,8 +251,10 @@ async def download_single_video(item, index: int) -> dict:
 
             return {
                 "url": url,
-                "status": "error",
-                "message": "something went wrong"
+                "status": "success",
+                "filename": filename,
+                "title": title,
+                "duration": ""
             }
     except Exception as e:
         return {
@@ -256,13 +263,57 @@ async def download_single_video(item, index: int) -> dict:
             "message": str(e)
         }
 
-def load_list_video_from_channel(channel_url: str) -> list:
-    return []    
-
-async def download_multiple_videos(items: list) -> list:
-    """Download multiple videos in parallel."""
-    tasks = [download_single_video(item, i) for i, item in enumerate(items)]
-    results = await asyncio.gather(*tasks)
+async def download_multiple_videos(download_id: str, items: list, concurrent_downloads: int) -> list:
+    """Download multiple videos in parallel with concurrency limit."""
+    
+    # Tạo semaphore để giới hạn concurrent downloads
+    semaphore = asyncio.Semaphore(concurrent_downloads)
+    
+    async def download_with_limit(item, idx):
+        """Wrapper function that respects semaphore limit"""
+        async with semaphore:  # Chỉ cho phép N tasks vào đây cùng lúc
+            try:
+                result = await download_single_video(item, idx)
+                
+                # Update progress
+                download_tasks[download_id]['completed'] += 1
+                download_tasks[download_id]['videos'][item['url']] = result
+                
+                print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [PROGRESS] Video {download_tasks[download_id]['completed']}/{download_tasks[download_id]['total']}: {item['url']} - {result['status']}")
+                
+                emit_progress(download_id, {
+                    'type': 'progress',
+                    'url': item['url'],
+                    'status': result['status'],
+                    'message': result.get('message', ''),
+                    'filename': result.get('filename', ''),
+                    'completed': download_tasks[download_id]['completed'],
+                    'total': download_tasks[download_id]['total']
+                })
+                
+                return result
+            except Exception as e:
+                return {
+                    'url': item.get('url', ''),
+                    'status': 'error',
+                    'message': str(e)
+                }
+    
+    # Tạo tasks cho tất cả videos
+    tasks = [download_with_limit(item, i) for i, item in enumerate(items)]
+    
+    # Chạy tất cả, nhưng semaphore sẽ giới hạn số lượng concurrent
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Send completion event
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [COMPLETION] All downloads finished: {download_tasks[download_id]['completed']}/{download_tasks[download_id]['total']}")
+    download_tasks[download_id]['status'] = 'completed'
+    emit_progress(download_id, {
+        'type': 'completed',
+        'total': download_tasks[download_id]['total'],
+        'completed': download_tasks[download_id]['completed']
+    })
+    
     return list(results)
 
 
@@ -317,11 +368,19 @@ def choose_directory():
 @app.route('/api/load_videos_by_user', methods=['POST'])
 def load_videos_by_user():
     def load_video_data():
+        global playlist_session
+        playlist_session = {}
         data = request.get_json()
         user_url = data.get('channel_url', '')
     
         if not user_url:
-            return jsonify({"error": "Không có URL kênh nào được cung cấp"}), 400
+            error_message = {
+            	"error": True,
+            	"message": "Empty input",
+            	"status": 400
+            }
+            yield json.dumps(error_message, ensure_ascii=False) + "\n"
+            return
 
         group_urls = classify_urls([user_url])
         group = group_urls[0]
@@ -337,10 +396,15 @@ def load_videos_by_user():
                     items = asyncio.run(scraper.douyin_fetch_user_post_videos(sec_user_id=temp['sec_user_id'], max_cursor=0, count=50))  
             elif temp['platform'] == "youtube":
                 items = YouTubeDownloader(temp['url'], "", 0, FFMPEG_PATH).get_channel_videos()
-        rs = []
         i = 1
+        temp1 = []
+        check_duplicate = []
         for item in items:
-            rs.append({
+            url = item['url']
+            if url in check_duplicate:
+                continue
+            check_duplicate.append(url)
+            video_data = {
                 "id": i,
                 "url": item['url'],
                 "caption": item['title'],
@@ -350,11 +414,21 @@ def load_videos_by_user():
                 "collects": item['collects'],
                 "shares": item['shares'],
                 "status": "Sẵn sàng",
-            })
+            }
+            temp1.append(video_data)
+            video_data['platform'] = temp['platform']
+            video_data['type'] = 'video'
+            playlist_session[url] = video_data  # Store each video in session
+            
+            if i % 5 == 0:
+                delay = max(0.1, random.gauss(1, 0.5))
+                time.sleep(delay)
+                yield json.dumps(temp1, ensure_ascii=False) + "\n"
+                temp1 = []
             i += 1
-        # print(rs)
-        yield json.dumps(rs, ensure_ascii=False) + "\n"
-    
+        if temp1:
+            yield json.dumps(temp1, ensure_ascii=False) + "\n"
+
     return Response(stream_with_context(load_video_data()), mimetype="application/x-ndjson")
 
 @app.route('/api/load_videos_by_user_test', methods=['POST'])
@@ -543,10 +617,6 @@ def load_videos_by_user_test():
             },
         ]
 
-
-        import json
-        import random
-        import time
         batch_size = random.randint(5, 6)
 
         for i in range(0, len(items), batch_size):
@@ -563,25 +633,91 @@ def load_videos_by_user_test():
 
 @app.route('/api/load_videos_by_list', methods=['POST'])
 def load_videos_by_list():
-    pass
+    def load_video_data():
+        global playlist_session
+        playlist_session = {}  # Reset session for new request
+        
+        data = request.get_json()
+        text_urls = data.get('urls', '')
+    
+        if not text_urls:
+            error_message = {
+            	"error": True,
+            	"message": "Empty input",
+            	"status": 400
+            }
+            yield json.dumps(error_message, ensure_ascii=False) + "\n"
+            return
+        urls = [url for url in text_urls.split('\n') if url.strip()]
+        groups = classify_urls(urls)
+        i = 1
+        temp = []
+        check_duplicate = []
+        for group in groups:
+            for item in group:
+                url = item['url']
+                if url in check_duplicate:
+                    continue
+                check_duplicate.append(url)
+                video_data = {
+                    "id": i,
+                    "url": url,
+                    "caption": "",
+                    "comments": 0,
+                    "likes": 0,
+                    "views": 0,
+                    "collects": 0,
+                    "shares": 0,
+                    "status": "Sẵn sàng" if item['platform'] else "Error",
+                }
+                temp.append(video_data)
+                video_data['platform'] = item['platform']
+                video_data['type'] = item['type']
+                playlist_session[url] = video_data  # Store each video in session
+                
+                if i % 5 == 0:
+                    yield json.dumps(temp, ensure_ascii=False) + "\n"
+                    temp = []
+                i += 1
+            if temp:
+                yield json.dumps(temp, ensure_ascii=False) + "\n"
+    
+    return Response(stream_with_context(load_video_data()), mimetype="application/x-ndjson")
+
+@app.route('/api/get_playlist_session', methods=['GET'])
+def get_playlist_session():
+    """Get the current playlist session data"""
+    global playlist_session
+    return jsonify({
+        'total': len(playlist_session),
+        'videos': playlist_session
+    })
+
 
 @app.route('/api/download_videos', methods=['POST'])
 def download_videos():
     """Start download and return download_id"""
+    global playlist_session
     try:
         data = request.get_json()
+        print(data)
         video_urls = data.get('video_urls', [])
         save_path = data.get('save_path', str(DOWNLOAD_FOLDER))
         quality = data.get('quality', 'Cao nhất')
         concurrent_downloads = data.get('concurrent_downloads', 5)
-        
-        print(f"[DOWNLOAD] Received {len(video_urls)} URLs to download:")
-        for i, url in enumerate(video_urls, 1):
-            print(f"  {i}. {url}")
-        
+
         if not video_urls:
             return jsonify({'error': 'No video URLs provided'}), 400
         
+        print(f"[DOWNLOAD] Received {len(video_urls)} URLs to download:")
+        items=[]
+        for i, url in enumerate(video_urls, 1):
+            print(f"  {i}. {url}")
+            item = playlist_session[url]
+            item['save_path'] = save_path
+            item['quality'] = quality
+            items.append(item)
+        # print(items)
         # Generate unique download ID
         download_id = str(uuid.uuid4())
         
@@ -598,11 +734,12 @@ def download_videos():
         
         # Start download in background thread
         thread = threading.Thread(
-            target=process_downloads_fake,
-            args=(download_id, video_urls, save_path, quality, concurrent_downloads)
+            target=run_async_downloads,
+            args=(download_id, items, concurrent_downloads)
         )
         thread.daemon = True
         thread.start()
+
         
         return jsonify({
             'download_id': download_id,
@@ -618,6 +755,39 @@ def emit_progress(download_id, data):
     """Emit progress event to SSE queue"""
     if download_id in download_queues:
         download_queues[download_id].put(data)
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [EMIT] {data.get('type', 'unknown')}: {data.get('url', 'N/A')[:50]}")
+    else:
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [EMIT ERROR] download_id {download_id} not in queues!")
+
+
+def run_async_downloads(download_id, items, concurrent_downloads):
+    """Wrapper to run async downloads in background thread"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Send initial started event
+        emit_progress(download_id, {
+            'type': 'started',
+            'total': len(items)
+        })
+        
+        # Run the async download function
+        results = loop.run_until_complete(
+            download_multiple_videos(download_id, items, concurrent_downloads)
+        )
+        
+        # Note: completion event is sent inside download_multiple_videos
+        
+    except Exception as e:
+        print(f"Error in run_async_downloads: {e}")
+        emit_progress(download_id, {
+            'type': 'error',
+            'error': str(e)
+        })
+    finally:
+        loop.close()
+
 
 
 def process_downloads_fake(download_id, video_urls, save_path, quality, concurrent_downloads):
@@ -665,7 +835,7 @@ def process_downloads_fake(download_id, video_urls, save_path, quality, concurre
                 'completed': download_tasks[download_id]['completed'],
                 'total': download_tasks[download_id]['total']
             })
-        
+
         # Send completion event
         download_tasks[download_id]['status'] = 'completed'
         emit_progress(download_id, {
@@ -673,7 +843,7 @@ def process_downloads_fake(download_id, video_urls, save_path, quality, concurre
             'total': download_tasks[download_id]['total'],
             'completed': download_tasks[download_id]['completed']
         })
-        
+
     except Exception as e:
         emit_progress(download_id, {
             'type': 'error',

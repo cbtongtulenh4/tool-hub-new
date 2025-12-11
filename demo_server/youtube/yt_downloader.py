@@ -13,10 +13,10 @@ class YouTubeDownloader:
             cls._instance = super(YouTubeDownloader, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, channel_url=None, output_dir=".", max_threads=4):
+    def __init__(self, channel_url=None, output_dir=".", max_threads=4, ffmpeg_path=None):
         if hasattr(self, '_initialized') and self._initialized:
             return
-            
+        self.ffmpeg_path = ffmpeg_path
         self.channel_url = channel_url
         self.output_dir = output_dir
         self.max_threads = max_threads
@@ -28,6 +28,8 @@ class YouTubeDownloader:
 
     def _get_ffmpeg_path(self):
         """Tự động tìm ffmpeg.exe trong folder bin khi chạy source hoặc file exe đóng gói."""
+        if self.ffmpeg_path:
+            return self.ffmpeg_path
         ffmpeg_filename = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
         
         # Đường dẫn thư mục gốc (nơi chứa exe hoặc file py)
@@ -95,10 +97,11 @@ class YouTubeDownloader:
                             item = {
                                 "url": url,
                                 "title": title,
-                                "view": e.get("view_count", 0),
-                                "like": e.get("like_count", 0),
-                                "comment": e.get("comment_count", 0),
-                                "share": 0
+                                "views": e.get("view_count", 0),
+                                "likes": e.get("like_count", 0),
+                                "comments": e.get("comment_count", 0),
+                                "shares": 0,
+                                "collects": 0
                             }
                             video_urls.append(item)
                             count += 1
@@ -113,7 +116,6 @@ class YouTubeDownloader:
 
     def download_worker(self, url: str):
         opts = self.get_download_options()
-        
         try:
             with YoutubeDL(opts) as ydl:
                 ydl.download([url])
@@ -135,3 +137,5 @@ class YouTubeDownloader:
                 except Exception:
                     pass
                 
+# if __name__ == "__main__":
+#     a = YouTubeDownloader(ffmpeg_path=r"C:\source_code_new\backup\video-downloader-interface\demo_server\bin\ffmpeg.exe").download_worker(url="https://youtu.be/OYUY7Ugupts?si=KXiq3lTj_pYew979")
