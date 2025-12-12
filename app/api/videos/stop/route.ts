@@ -2,8 +2,8 @@
 import { NextResponse } from "next/server"
 
 export async function POST(request: Request) {
-    // Simulate processing the stop command
-    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const response = await fetch("http://localhost:5000/api/download/stop")
 
     return NextResponse.json({ message: "Stop command received" })
 }

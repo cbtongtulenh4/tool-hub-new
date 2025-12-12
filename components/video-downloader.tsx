@@ -25,6 +25,7 @@ export function VideoDownloader() {
   const [isDataFetched, setIsDataFetched] = useState(false)
   const [videos, setVideos] = useState<VideoItem[]>([])
   const [isDownloading, setIsDownloading] = useState(false)
+  const [isStoping, setIsStoping] = useState(false)
   const [currentDownloadingIds, setCurrentDownloadingIds] = useState<number[]>([])
   const [downloadedCount, setDownloadedCount] = useState(0)
   const [totalDownloadCount, setTotalDownloadCount] = useState(0)
@@ -143,12 +144,13 @@ export function VideoDownloader() {
   }
 
   const handleStopFetch = async () => {
+    setIsStoping(true)
     try {
-      await fetch("/api/videos/stop", { method: "POST" })
+      await fetch("/api/videos/load/stop", { method: "POST" })
     } catch (error) {
       console.error("Error stopping fetch:", error)
     }
-
+    setIsStoping(false)
     setIsLoading(false)
     setIsDataFetched(false)
     setSelectedVideos([])
@@ -177,7 +179,7 @@ export function VideoDownloader() {
     // Get URLs of selected videos, excluding already completed ones
     const selectedVideoUrls = videos
       .filter(v => selectedVideos.includes(v.id))
-      .filter(v => !v.status.includes('Hoàn thành'))  // Skip completed videos
+      // .filter(v => !v.status.includes('Hoàn thành'))  // Skip completed videos
       .map(v => v.url)
 
     // Deduplicate URLs to avoid downloading same video multiple times
@@ -194,6 +196,7 @@ export function VideoDownloader() {
         description: "Tất cả videos đã chọn đều đã được tải xuống",
         variant: "default",
       })
+      setIsDownloading(false)
       return
     }
 
@@ -258,7 +261,7 @@ export function VideoDownloader() {
                     ...v,
                     status: progressData.status === 'success'
                       ? 'Hoàn thành ✓'
-                      : `Lỗi: ${progressData.message || 'Unknown error'}`
+                      : progressData.status === 'Cancelled' ? 'Hủy bỏ' : `Lỗi: ${progressData.message || 'Unknown error'}`
                   }
                   : v
               )
@@ -311,12 +314,14 @@ export function VideoDownloader() {
     }
   }
 
-  const handleStopDownload = () => {
-    setIsDownloading(false)
-    setCurrentDownloadingIds([])
-    setVideos((prev) =>
-      prev.map((v) => (v.status.includes("Đang") || v.status.includes("Tải") ? { ...v, status: "Đã dừng" } : v)),
-    )
+  const handleStopDownload = async () => {
+    setIsStoping(true)
+    try {
+      await fetch("/api/videos/download/stop", { method: "POST" })
+    } catch (error) {
+      console.error("Error stopping fetch:", error)
+    }
+    setIsStoping(false)
   }
 
   return (
@@ -385,6 +390,7 @@ export function VideoDownloader() {
               isDataFetched={isDataFetched}
               selectedCount={selectedVideos.length}
               isDownloading={isDownloading}
+              isStoping={isStoping}
               onStartDownload={handleStartDownload}
               onStopDownload={handleStopDownload}
               downloadedCount={downloadedCount}

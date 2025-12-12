@@ -35,6 +35,8 @@ FFMPEG_PATH = os.path.join(sys._MEIPASS if getattr(sys, 'frozen', False) else os
 download_tasks = {}  # {download_id: {status, videos, progress}}
 download_queues = {}  # {download_id: Queue for SSE events}
 playlist_session = []
+download_stopped = threading.Event()
+download_stopped.set()
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to remove invalid characters."""
@@ -123,6 +125,13 @@ def classify_urls(urls: list) -> list:
 async def download_single_video(item, index: int) -> dict:
     """Download a single video from URL."""
     try:
+        resp_cancel = {
+            "url": item['url'],
+            "status": "Cancelled",
+            "message": "cancel download"
+        }
+        if download_stopped.is_set():
+            return resp_cancel
         url = item['url']
         platform = item['platform']
         if not platform:
@@ -134,6 +143,8 @@ async def download_single_video(item, index: int) -> dict:
 
         if platform == "youtube":
             # Wrap sync YouTube downloader in async to prevent blocking
+            if download_stopped.is_set():
+                return resp_cancel
             downloader = YouTubeDownloader(url, item['save_path'], 0, ffmpeg_path=FFMPEG_PATH)
             await asyncio.to_thread(downloader.download_worker, url)
             return {
@@ -160,6 +171,9 @@ async def download_single_video(item, index: int) -> dict:
         cnt = result.get("cnt", 0)
         medias = result.get("medias", [])
         
+        if download_stopped.is_set():
+            return resp_cancel
+
         if not medias:
             return {
                 "url": url,
@@ -327,22 +341,17 @@ def choose_directory():
         return response
 
     try:
-        # PowerShell command to open a Folder Browser Dialog
-        ps_command = """
-        Add-Type -AssemblyName System.Windows.Forms
-        $f = New-Object System.Windows.Forms.FolderBrowserDialog
-        $f.Description = "Chọn thư mục lưu video"
-        $f.ShowNewFolderButton = $true
-        if ($f.ShowDialog() -eq 'OK') {
-            $f.SelectedPath
-        } else {
-            Write-Output "CANCELLED"
-        }
-        """
+        # Use tkinter in a subprocess to ensure thread safety and proper window management
+        # We create a hidden root window and set it to topmost to force the dialog to the front
+        cmd = [
+            sys.executable, 
+            "-c", 
+            "import tkinter as tk; from tkinter import filedialog; root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True); print(filedialog.askdirectory()); root.destroy()"
+        ]
         
-        # Execute PowerShell command
+        # Execute Python command
         result = subprocess.run(
-            ["powershell", "-Command", ps_command], 
+            cmd, 
             capture_output=True, 
             text=True, 
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -350,9 +359,10 @@ def choose_directory():
         
         selected_path = result.stdout.strip()
         
-        if not selected_path or selected_path == "CANCELLED":
+        if not selected_path:
             response = jsonify({"path": None})
         else:
+            # tkinter might return empty string on cancel, or path
             response = jsonify({"path": selected_path})
             
         response.headers.add('Access-Control-Allow-Origin', '*')
@@ -420,7 +430,7 @@ def load_videos_by_user():
             video_data['type'] = 'video'
             playlist_session[url] = video_data  # Store each video in session
             
-            if i % 5 == 0:
+            if i % 20 == 0:
                 delay = max(0.1, random.gauss(1, 0.5))
                 time.sleep(delay)
                 yield json.dumps(temp1, ensure_ascii=False) + "\n"
@@ -675,7 +685,7 @@ def load_videos_by_list():
                 video_data['type'] = item['type']
                 playlist_session[url] = video_data  # Store each video in session
                 
-                if i % 5 == 0:
+                if i % 20 == 0:
                     yield json.dumps(temp, ensure_ascii=False) + "\n"
                     temp = []
                 i += 1
@@ -762,6 +772,7 @@ def emit_progress(download_id, data):
 
 def run_async_downloads(download_id, items, concurrent_downloads):
     """Wrapper to run async downloads in background thread"""
+    download_stopped.clear()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
@@ -771,7 +782,6 @@ def run_async_downloads(download_id, items, concurrent_downloads):
             'type': 'started',
             'total': len(items)
         })
-        
         # Run the async download function
         results = loop.run_until_complete(
             download_multiple_videos(download_id, items, concurrent_downloads)
@@ -787,6 +797,7 @@ def run_async_downloads(download_id, items, concurrent_downloads):
         })
     finally:
         loop.close()
+        download_stopped.set()
 
 
 
@@ -890,32 +901,18 @@ def download_progress(download_id):
         }
     )
 
-
-
-
-@app.route('/api/load_videos/stop', methods=['POST', 'OPTIONS'])
-def api_videos_stop():
-    """Handle stop request from frontend."""
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        return response
-    
+@app.route('/api/download/stop', methods=['POST'])
+def api_download_stop():
+    """Handle stop download request from frontend."""
     try:
-        # Simulate processing
-        import time
-        time.sleep(0.5)
-        
+        print("Waiting for downloads to stop...")
+        download_stopped.wait()
+        print("Downloads stopped.")
         response = jsonify({'message': 'Stop command received'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
         return response
-        
     except Exception as e:
-        print(f"Error in api_videos_stop: {e}")
+        print(f"Error in api_download_stop: {e}")
         response = jsonify({'error': str(e)})
-        response.headers.add('Access-Control-Allow-Origin', '*')
         return response, 500
 
 

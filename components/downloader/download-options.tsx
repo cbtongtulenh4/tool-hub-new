@@ -14,6 +14,7 @@ interface DownloadOptionsProps {
   isDataFetched: boolean
   selectedCount: number
   isDownloading: boolean
+  isStoping: boolean
   onStartDownload: (options: DownloadSettings) => void
   onStopDownload: () => void
   downloadedCount: number
@@ -36,6 +37,7 @@ export function DownloadOptions({
   isDataFetched,
   selectedCount,
   isDownloading,
+  isStoping,
   onStartDownload,
   onStopDownload,
   downloadedCount,
@@ -288,7 +290,7 @@ export function DownloadOptions({
             </button>
           )}
           <button
-            disabled={true}//{!isDownloading}
+            disabled={!isDownloading || isStoping}
             onClick={onStopDownload}
             className="cursor-pointer flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-4 py-2.5 rounded-xl transition-all duration-300 hover:shadow-lg hover:shadow-red-500/10 active:scale-95"
           >
