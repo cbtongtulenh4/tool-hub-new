@@ -12,7 +12,7 @@ interface VideoItem {
   caption: string
   comments: number
   likes: string
-  views: string
+  collects: string
   shares: number
   status: string
 }
