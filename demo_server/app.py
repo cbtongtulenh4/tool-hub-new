@@ -40,29 +40,11 @@ download_stopped.set()
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to remove invalid characters."""
-    # Remove invalid characters
     filename = re.sub(r'[<>:"/\\|?*]', '', filename)
-    # Remove leading/trailing spaces and dots
     filename = filename.strip('. ')
-    # Limit length
     if len(filename) > 200:
         filename = filename[:200]
     return filename or "video"
-
-
-def detect_platform(url: str) -> str:
-    """Auto-detect platform from URL."""
-    url_lower = url.lower()
-    if 'youtube.com' in url_lower or 'youtu.be' in url_lower:
-        return 'youtube'
-    elif 'tiktok.com' in url_lower:
-        return 'tiktok'
-    elif 'douyin.com' in url_lower:
-        return 'douyin'
-    elif 'facebook.com' in url_lower or 'fb.com' in url_lower:
-        return 'facebook'
-    else:
-        return 'sax'  # Default to youtube
 
 def classify_urls(urls: list) -> list:
     result_groups = [] 
@@ -154,12 +136,8 @@ async def download_single_video(item, index: int) -> dict:
                 "title": "",
                 "duration": ""
             }
-
-        # Get video info from fsmvid
-        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [FSMVID START] Getting info for {url}")
         fsmvid = FSMVIDDown()
         result = await fsmvid.download(platform, url)
-        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [FSMVID DONE] Got info for {url}")
         
         if not result or result.get("status", "") != "success" or result.get("cnt", 0) == 0:
             return {
@@ -180,12 +158,8 @@ async def download_single_video(item, index: int) -> dict:
                 "status": "error",
                 "message": "Không tìm thấy media để download"
             }
-        
-        # Generate filename
         video_id = result.get("id", uuid.uuid4())
         title = result.get("title", "video")
-
-        # Case 1: cnt == 1, video already has audio
         if cnt == 1:
             video_media = medias[0]
             video_url = video_media.get("url")
@@ -201,7 +175,6 @@ async def download_single_video(item, index: int) -> dict:
                 extension = video_media.get("extension", "jpg")
                 filename = f"{sanitize_filename(video_id)}.{extension}"
                 filepath = Path(item['save_path']) / filename
-                # Download the image
                 async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
                     async with client.stream("GET", video_url) as response:
                         response.raise_for_status()
@@ -217,8 +190,6 @@ async def download_single_video(item, index: int) -> dict:
             ext = video_media.get("ext", "mp4")
             filename = f"{sanitize_filename(video_id)}.{ext}"
             filepath = Path(item['save_path']) / filename
-            # Download the video
-            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [DOWNLOAD START] {url}")
             async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
                 async with client.stream("GET", video_url) as response:
                     response.raise_for_status()
@@ -226,15 +197,13 @@ async def download_single_video(item, index: int) -> dict:
                     async with aiofiles.open(filepath, "wb") as f:
                         async for chunk in response.aiter_bytes(chunk_size=4 * 1024 * 1024):  # 4MB
                             await f.write(chunk)
-            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [DOWNLOAD END] {item['url']} downloaded successfully")
             return {
                 "url": url,
                 "status": "success",
                 "filename": filename,
                 "title": title,
-                # "size": len(response.content)
             }
-        
+
         elif cnt == 2:
             video_media = medias[0]
             
@@ -313,14 +282,8 @@ async def download_multiple_videos(download_id: str, items: list, concurrent_dow
                     'message': str(e)
                 }
     
-    # Tạo tasks cho tất cả videos
     tasks = [download_with_limit(item, i) for i, item in enumerate(items)]
-    
-    # Chạy tất cả, nhưng semaphore sẽ giới hạn số lượng concurrent
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # Send completion event
-    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [COMPLETION] All downloads finished: {download_tasks[download_id]['completed']}/{download_tasks[download_id]['total']}")
     download_tasks[download_id]['status'] = 'completed'
     emit_progress(download_id, {
         'type': 'completed',
@@ -341,15 +304,12 @@ def choose_directory():
         return response
 
     try:
-        # Use tkinter in a subprocess to ensure thread safety and proper window management
-        # We create a hidden root window and set it to topmost to force the dialog to the front
         cmd = [
             sys.executable, 
             "-c", 
             "import tkinter as tk; from tkinter import filedialog; root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True); print(filedialog.askdirectory()); root.destroy()"
         ]
         
-        # Execute Python command
         result = subprocess.run(
             cmd, 
             capture_output=True, 
@@ -362,7 +322,6 @@ def choose_directory():
         if not selected_path:
             response = jsonify({"path": None})
         else:
-            # tkinter might return empty string on cancel, or path
             response = jsonify({"path": selected_path})
             
         response.headers.add('Access-Control-Allow-Origin', '*')
@@ -398,10 +357,7 @@ def load_videos_by_user():
         items = []
         if temp['type'] == 'channel':
             if temp['platform'] == "tiktok" or temp['platform'] == "douyin":
-                scraper = DouyinTiktokScraper(
-                    douyin_cookie="ttwid=1%7CBD3GjtVoizObrVlBxAjnS7sw4iCYET8Lz1fvFRBcb9s%7C1765099018%7C95911db5fe6d88cce9fe58f586b9661d9b49ef041146760b0b429fa65f17d6ec; enter_pc_once=1; UIFID_TEMP=47253ff694b1a3f0276ef6188afc260853569160d1a9e22d73502760654854795f67336c30a5aae0d9f9a5b736035302ccbfc714f928c82e905e34a16ee3f93c8073d4df545db26c9c24e738aab9e4c9; hevc_supported=true; xgplayer_user_id=579737460722; fpk1=U2FsdGVkX1+iy1hukcoNKPtmFQaulDXO5OBUUU5d2bXfv6UTj6ScmMPReVi35gq0E6CZk7YpE/oh7gu0yHG5Sg==; fpk2=bfe921b394bf10c8d08c5999edfccc8d; bd_ticket_guard_client_web_domain=2; bd_ticket_guard_client_data_v2=eyJyZWVfcHVibGljX2tleSI6IkJNNktiK2dYeFVNd0ZnS241T0x0WDd3Y0RQUzMxM3FhWDJnZE5iUzE1aUYwQUxaKzIwZWlrRDF4S3NaWVIwWW11S0NrUk1VU0hjSUFpTzdzSjhVckthYz0iLCJ0c19zaWduIjoidHMuMi4zYmU4ZTEyODY2ZDk4YmUyMTFlMjA0YjNjYjRlNTZiNGJkNTcxZGRjYjBkNGQwMWJhMGQ3ZjJhNjZiMmFjZDNkYzRmYmU4N2QyMzE5Y2YwNTMxODYyNGNlZGExNDkxMWNhNDA2ZGVkYmViZWRkYjJlMzBmY2U4ZDRmYTAyNTc1ZCIsInJlcV9jb250ZW50Ijoic2VjX3RzIiwicmVxX3NpZ24iOiJOUkE4QUl4Z1VWVStVYTEramgzRjFCZDQxYXF0SGdvaE9aSjRwZ2xXWmZFPSIsInNlY190cyI6IiNKdkxKbDVZUUt3a0twUnhZMGZqYUxVM1ZpZno1NGlTSEVvTnNTbk1EeHJaVEJIYjQ2MGJaQU5lQU5ZblMifQ%3D%3D; odin_tt=c7fffa135a0bcb84e7c1b799548dc538ffe2246fb6cca1ac434740885c1e282236bfa726561fc60bbfedc961f0188694b7afa80b6620cde73f8371a5fa5b28ce; UIFID=47253ff694b1a3f0276ef6188afc260853569160d1a9e22d735027606548547974ba1127f039352ad446e71a171a006b21c539738d2a3709b3b9723b06104ed0bdf417c279822f556089112aa631f76a7632dc748fc624b4f55e9a67d308865f0a85c5d0324db726dda27479b40b790e4b5711316ab73bcb910b5460cfdc6b2e62cb296eca3f738248662417e389e671e17f9fd3faee6758a00d5e57d69eb746; IsDouyinActive=true; home_can_add_dy_2_desktop=%220%22; dy_swidth=1920; dy_sheight=1080; stream_recommend_feed_params=%22%7B%5C%22cookie_enabled%5C%22%3Atrue%2C%5C%22screen_width%5C%22%3A1920%2C%5C%22screen_height%5C%22%3A1080%2C%5C%22browser_online%5C%22%3Atrue%2C%5C%22cpu_core_num%5C%22%3A16%2C%5C%22device_memory%5C%22%3A0%2C%5C%22downlink%5C%22%3A%5C%22%5C%22%2C%5C%22effective_type%5C%22%3A%5C%22%5C%22%2C%5C%22round_trip_time%5C%22%3A0%7D%22; strategyABtestKey=%221765099012.711%22; s_v_web_id=verify_miqbhvc2_Lhxa2v2g_Kqe2_43SZ_90a4_RWMbrdkSQjeJ; is_dash_user=1; passport_csrf_token=660815ecff8b7c91e613a68307e9718b; passport_csrf_token_default=660815ecff8b7c91e613a68307e9718b; volume_info=%7B%22isUserMute%22%3Afalse%2C%22isMute%22%3Atrue%2C%22volume%22%3A0.6%7D; __security_mc_1_s_sdk_crypt_sdk=8b8b24d8-47bb-9077; stream_player_status_params=%22%7B%5C%22is_auto_play%5C%22%3A0%2C%5C%22is_full_screen%5C%22%3A0%2C%5C%22is_full_webscreen%5C%22%3A1%2C%5C%22is_mute%5C%22%3A1%2C%5C%22is_speed%5C%22%3A1%2C%5C%22is_visible%5C%22%3A0%7D%22; download_guide=%223%2F20251204%2F0%22; passport_mfa_token=CjafkCFrvWfl2eRWAsHEsft666gjDyorY0gTGwqOCt3dUrHI6%2BOpOSm3BogZfBU1GUAfauLwROQaSgo8AAAAAAAAAAAAAE%2FKv4fk7D884Id%2FXHU5oDF%2B3RJImLOAr0xFXXHDUkorS%2BwS3yLMu8ZvFpUV12nbZSw1EPOmgw4Y9rHRbCACIgEDTyS9Ag%3D%3D; d_ticket=a5e10219eb2a9ec9f3e8817cab8a3ff42be43; passport_assist_user=CkDkVuuz2G13H3cfC4ro1r7cghW9eeH3c6M3Y_WfY5eEkhFd4_3_eKGlbbb7PVs7_gvbrbCjyspJ7Tol6EoMOPAZGkoKPAAAAAAAAAAAAABPypXRi27gDOEqS3wa75CIOEGN5mUCRmJaVG8B-BpI234Gg1t6aKHB0zCrdcPlwhhkbRDcpYMOGImv1lQgASIBAx0y3bU%3D; n_mh=hUgTZD6li-owxWv0c9ucMJOYC9hjLhbRWR6AsBtoJb4; passport_auth_status=3749f688e926568ddbcd8f7d0d720d99%2C; passport_auth_status_ss=3749f688e926568ddbcd8f7d0d720d99%2C; sid_guard=3f44b6fbcf985a339fe3d39a1eaa7c19%7C1764864200%7C5184000%7CMon%2C+02-Feb-2026+16%3A03%3A20+GMT; uid_tt=a314143430a5288f866168d2f63c74b6; uid_tt_ss=a314143430a5288f866168d2f63c74b6; sid_tt=3f44b6fbcf985a339fe3d39a1eaa7c19; sessionid=3f44b6fbcf985a339fe3d39a1eaa7c19; sessionid_ss=3f44b6fbcf985a339fe3d39a1eaa7c19; session_tlb_tag=sttt%7C16%7CP0S2-8-YWjOf49OaHqp8Gf________-_ksP5DZn1K48-Wgua85vJaBYKUrMUnObA0iED3-Uq9sY%3D; session_tlb_tag_bk=sttt%7C16%7CP0S2-8-YWjOf49OaHqp8Gf________-_ksP5DZn1K48-Wgua85vJaBYKUrMUnObA0iED3-Uq9sY%3D; is_staff_user=false; sid_ucp_v1=1.0.0-KGMwNzBkZGRhOTk1NmQ5YTEyNzczY2MzODQ5NGNhMjFlOGI2NWVjYjIKIAjN0vCfvfUmEMjhxskGGO8xIAww___07QU4AkDxB0gEGgJscSIgM2Y0NGI2ZmJjZjk4NWEzMzlmZTNkMzlhMWVhYTdjMTk; ssid_ucp_v1=1.0.0-KGMwNzBkZGRhOTk1NmQ5YTEyNzczY2MzODQ5NGNhMjFlOGI2NWVjYjIKIAjN0vCfvfUmEMjhxskGGO8xIAww___07QU4AkDxB0gEGgJscSIgM2Y0NGI2ZmJjZjk4NWEzMzlmZTNkMzlhMWVhYTdjMTk; _bd_ticket_crypt_doamin=2; _bd_ticket_crypt_cookie=0577c5d260e5f6cc4a9b0bbb0cfce88c; __security_mc_1_s_sdk_sign_data_key_web_protect=c59d922a-45ce-9ea0; __security_mc_1_s_sdk_cert_key=aee3377c-4335-b639; __security_server_data_status=1; login_time=1764864201130; SelfTabRedDotControl=%5B%5D; FOLLOW_LIVE_POINT_INFO=%22MS4wLjABAAAAG30iru_BqzP12E8vXgcnbBoge2KOBtANJKJzUgF8YEg%2F1765126800000%2F0%2F0%2F1765099674325%22; publish_badge_show_info=%220%2C0%2C0%2C1764864228506%22; FOLLOW_NUMBER_YELLOW_POINT_INFO=%22MS4wLjABAAAAG30iru_BqzP12E8vXgcnbBoge2KOBtANJKJzUgF8YEg%2F1765126800000%2F0%2F1765099074326%2F0%22; WallpaperGuide=%7B%22showTime%22%3A1764888586759%2C%22closeTime%22%3A0%2C%22showCount%22%3A1%2C%22cursor1%22%3A14%2C%22cursor2%22%3A4%2C%22hoverTime%22%3A1764982206395%7D; __ac_nonce=0693545f10082f703a313; __ac_signature=_02B4Z6wo00f012WDvkAAAIDAIFjQ.JEnpdtlsrrAALBgp0n8lAgcQ0kqAj7BjEOzqzrpiYqL.MtNZyvWS.u3bzaPwbzt7dkqyMG1.al49--ws9iC-O51nyO0AigFxUEZyjIWiZwHLaOJ5ksebc; douyin.com; xg_device_score=7.43799004027265; device_web_cpu_core=16; device_web_memory_size=-1; architecture=amd64; biz_trace_id=c8a2597a; sdk_source_info=7e276470716a68645a606960273f276364697660272927676c715a6d6069756077273f276364697660272927666d776a68605a607d71606b766c6a6b5a7666776c7571273f275e58272927666a6b766a69605a696c6061273f27636469766027292762696a6764695a7364776c6467696076273f275e582729277672715a646971273f2763646976602729277f6b5a666475273f2763646976602729276d6a6e5a6b6a716c273f2763646976602729276c6b6f5a7f6367273f27636469766027292771273f273731323237353c3c3530333234272927676c715a75776a716a666a69273f2763646976602778; bit_env=5M0fJ5rH_UqjctpWA5inZRnxCwojrNKP5Z99PVmNnnFTe3qgK61vMIS5SUN0U8MtorcSxenMS97glf_Pj15BpfKfksiCBvttOwHr6QyUPTpVl7px5QkqGVX2EaPmCbJ9w-UgBviT07sRSUmIaLsdBt5wK1T0584zxObyRLhiAYUcHvwMg6GNRixxmlnz92houJ-tlrBQTNgGIT9urgM7vbJxEi509o6261v2e9Hr-646LfRfe0gScfXs-yumuMWX7lVT8toBO4gYrHwPGL--F4WFygETGQ6oHCT-9VJEIu8fGTmzEKsoZREeipedPsfO0wHXqpwQ1BIK0jtbTajmVljb01xRsJdWYt5aKCBEb1MLg7srZHXk9pmZW_3IdoLn7U_5IKZHDFeyQidDIbV33rN1jg6TTSBcP5q3Fz5p8zaIbxz3lXBhym0d0xNC1t_9vYMc9ZvNRptpvI_WNDWmHw%3D%3D; gulu_source_res=eyJwX2luIjoiNWI1Zjg1NGQzZDdiYzUzOGJiZTk0MDQ0NTcwYzkzNjA3YjI0MGVjYmZmODE4ZGY1ZWRmZWIxMmQwY2U2Yzg4MSJ9; passport_auth_mix_state=ypg0hmbjjtjpt8krp9p8cbupk0k5l22q; bd_ticket_guard_client_data=eyJiZC10aWNrZXQtZ3VhcmQtdmVyc2lvbiI6MiwiYmQtdGlja2V0LWd1YXJkLWl0ZXJhdGlvbi12ZXJzaW9uIjoxLCJiZC10aWNrZXQtZ3VhcmQtcmVlLXB1YmxpYy1rZXkiOiJCTTZLYitnWHhVTXdGZ0tuNU9MdFg3d2NEUFMzMTNxYVgyZ2ROYlMxNWlGMEFMWisyMGVpa0QxeEtzWllSMFltdUtDa1JNVVNIY0lBaU83c0o4VXJLYWM9IiwiYmQtdGlja2V0LWd1YXJkLXdlYi12ZXJzaW9uIjoyfQ%3D%3D",
-                    tiktok_cookie="ttwid=1%7CkO5yilXeGaNWdFUd9vniAYyowHOs1hnLOFMM98nU3oE%7C1765118143%7C48237e937dbb6681b31003f29bf733d2f0cb8cbf9177320e9c4bcbdbe644acea; tt_chain_token=4CqUZ4QcMUs9Qsa0B8AqWw==; tiktok_webapp_theme_source=auto; tiktok_webapp_theme=dark; msToken=FuTnwlyt0j3jPWErZfLSf12y4fp98aw0FrXvxGOWX1DcNWge6mYJGZWp4aJGwszamk19UAs-kuBqd-5BdsR94y4twvrEQKVjmVUOEzsgKGr_1A07MpapENr0J6886-29umSsABQVTP3XhcgujJUlQv8=; odin_tt=f8bf6f24c0e8a8f71e8814f6aa4af33addef3bc5944615835be9e0261799149a27057a94dd608d88d71ddbc3ecd3e6779129022e463ac438caf1af2f44605ea190bb193e492d4d0beb100c9cd238b960; passport_csrf_token=925357f378a22b9194b9a186e4d768ec; passport_csrf_token_default=925357f378a22b9194b9a186e4d768ec; delay_guest_mode_vid=5; tt_csrf_token=bFtcJt0m-J2JzQyez29lWbxfbxq3I9jQB52U; s_v_web_id=verify_mivtr9og_YibNzABY_GRvO_4fc3_Bjzz_QjE05qSbMGt1; multi_sids=7440878950417794103%3A060ade417db635170c34b0c2cced01e1; cmpl_token=AgQYAPOF_hfkTtK3faFc6GddDvN3-Wp-z_-QDmCjfH8; sid_guard=060ade417db635170c34b0c2cced01e1%7C1765118136%7C15552000%7CFri%2C+05-Jun-2026+14%3A35%3A36+GMT; uid_tt=9c20af74aac806a2b58aca04ec9051c5d0e8ce1c54bd25c0e4805ca972895167; uid_tt_ss=9c20af74aac806a2b58aca04ec9051c5d0e8ce1c54bd25c0e4805ca972895167; sid_tt=060ade417db635170c34b0c2cced01e1; sessionid=060ade417db635170c34b0c2cced01e1; sessionid_ss=060ade417db635170c34b0c2cced01e1; tt_session_tlb_tag=sttt%7C5%7CBgreQX22NRcMNLDCzO0B4f_________CM7VtH8TXBhsswwqSIfAZq4KBKNu1yEOkPmjYoixMWaA%3D; sid_ucp_v1=1.0.1-KGJhNGIwMjIzY2M5MTNiZTk0OThjOWQ0MWVhM2U0NGFkYmNiM2ZlZTUKIgi3iNaCtv_ToWcQuKHWyQYYswsgDDCgoI26BjgHQPQHSAQQAxoGbWFsaXZhIiAwNjBhZGU0MTdkYjYzNTE3MGMzNGIwYzJjY2VkMDFlMTJOCiCEf8NwuuOZ9YKKxuHWCa4pDgHHEBgDHKeLjwWVs73nKRIgdv9-OeVuXnTCzPZh_fB0NHhOhCRyOhbTd_819SZ0s4YYAiIGdGlrdG9r; ssid_ucp_v1=1.0.1-KGJhNGIwMjIzY2M5MTNiZTk0OThjOWQ0MWVhM2U0NGFkYmNiM2ZlZTUKIgi3iNaCtv_ToWcQuKHWyQYYswsgDDCgoI26BjgHQPQHSAQQAxoGbWFsaXZhIiAwNjBhZGU0MTdkYjYzNTE3MGMzNGIwYzJjY2VkMDFlMTJOCiCEf8NwuuOZ9YKKxuHWCa4pDgHHEBgDHKeLjwWVs73nKRIgdv9-OeVuXnTCzPZh_fB0NHhOhCRyOhbTd_819SZ0s4YYAiIGdGlrdG9r; store-idc=alisg; store-country-sign=MEIEDF06NFTWTvv4EgpaLAQgFDVG_5OSU7-6iuylH2Y6cwRXbVzsZU4i0ACaW8kDyfMEEJpsNweLnAZK-1Jb6gETR_U; store-country-code=vn; store-country-code-src=uid; tt-target-idc=alisg; tt-target-idc-sign=Oh_RqMtekTzoeohZYKd_WcBb7lUp8AASX98scnMMCLxcr4P4_kFHq6XNbWaT0FRCPiWyMGJO2au0laGs0m_-0eCtFFbIlbE1OSy4bUClHSYF5bON4KmnMk8hsVIigX2Ci4CkC2CpJC8brzA0-72aAN8AO8i8rajzDaS4MYDd-BEV235R551nYtG6kf4fN6PCCoWbyivFQD8MgaF7qt9Vwd162iuUaj91mCYtdZWSlSigleqo3KItsokMZOPTFxPt5MnkJBW7LT-ddmwLFxeGIzX2R021Q9CwSIkg_HA8mGfImk2wv9plsxBq5Zl_u3PgHSwRAyjzVLg951APkITX7o9bKAwwlvnhe3f1i1T3peXQ1hIDsYMXZzBBmvxcK5OVd0o_syfo7h_iZFQsKqm9HzMZ7b90s5gttfZEZanasBhKniyMPp0jCf7VMctF9bBEBJASvbz8cj0NltT9QF5SDIctiQv_hPA9fuyri3cYRgFXFzsxLZjIjaDZ5-7uiWSI; last_login_method=QRcode; passport_fe_beating_status=true; perf_feed_cache={%22expireTimestamp%22:1765288800000%2C%22itemIds%22:[%227580215398243552542%22%2C%227566645514549153045%22%2C%227577963420746648853%22]}; msToken=2_FfizMOPLM3Vh3eXBIQtOAcveWoHo7y7rgBQzjCaXtQGmODl2zEG--BFF5Zxdo8FeGxH7_0EzGn_LI2WdiNItfSDqVw5wNRCN1B1z0RPgUfp7NQ0qzP955gfEg-L5kX263UpoJ9VDAFOYou-Y8HEbY="
-                )
+                scraper = DouyinTiktokScraper()
                 if temp['platform'] == "douyin":
                     items = asyncio.run(scraper.douyin_fetch_user_post_videos(sec_user_id=temp['sec_user_id'], max_cursor=0, count=50))  
             elif temp['platform'] == "youtube":
@@ -440,206 +396,6 @@ def load_videos_by_user():
             yield json.dumps(temp1, ensure_ascii=False) + "\n"
 
     return Response(stream_with_context(load_video_data()), mimetype="application/x-ndjson")
-
-@app.route('/api/load_videos_by_user_test', methods=['POST'])
-def load_videos_by_user_test():
-    def load_video_data():
-        items = [
-            {
-                "id": 1,
-                "url": "https://www.tiktok.com/@user/video/1",
-                "caption": "Hãy bảo vệ cảm xúc của bạn...",
-                "comments": 8,
-                "likes": "494",
-                "views": "9.7K",
-                "shares": 30,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 2,
-                "url": "https://www.tiktok.com/@user/video/2",
-                "caption": "Con người khó tính nhất...",
-                "comments": 2,
-                "likes": "321",
-                "views": "5.2K",
-                "shares": 21,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 3,
-                "url": "https://www.tiktok.com/@user/video/3",
-                "caption": "Tâm bất định, không làm...",
-                "comments": 45,
-                "likes": "3.4K",
-                "views": "37.8K",
-                "shares": 151,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 4,
-                "url": "https://www.tiktok.com/@user/video/4",
-                "caption": "Sự tại nhân vi, mạc oán...",
-                "comments": 62,
-                "likes": "4.0K",
-                "views": "37.7K",
-                "shares": 232,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 5,
-                "url": "https://www.tiktok.com/@user/video/5",
-                "caption": "Phong cảnh hữu tình...",
-                "comments": 7,
-                "likes": "141",
-                "views": "2.7K",
-                "shares": 2,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 6,
-                "url": "https://www.tiktok.com/@user/video/6",
-                "caption": "Thả kiểu nhung nhớ...",
-                "comments": 34,
-                "likes": "2.6K",
-                "views": "56.4K",
-                "shares": 127,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 7,
-                "url": "https://www.tiktok.com/@user/video/1",
-                "caption": "Hãy bảo vệ cảm xúc của bạn...",
-                "comments": 8,
-                "likes": "494",
-                "views": "9.7K",
-                "shares": 30,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 8,
-                "url": "https://www.tiktok.com/@user/video/2",
-                "caption": "Con người khó tính nhất...",
-                "comments": 2,
-                "likes": "321",
-                "views": "5.2K",
-                "shares": 21,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 9,
-                "url": "https://www.tiktok.com/@user/video/3",
-                "caption": "Tâm bất định, không làm...",
-                "comments": 45,
-                "likes": "3.4K",
-                "views": "37.8K",
-                "shares": 151,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 10,
-                "url": "https://www.tiktok.com/@user/video/4",
-                "caption": "Sự tại nhân vi, mạc oán...",
-                "comments": 62,
-                "likes": "4.0K",
-                "views": "37.7K",
-                "shares": 232,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 11,
-                "url": "https://www.tiktok.com/@user/video/5",
-                "caption": "Phong cảnh hữu tình...",
-                "comments": 7,
-                "likes": "141",
-                "views": "2.7K",
-                "shares": 2,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 12,
-                "url": "https://www.tiktok.com/@user/video/6",
-                "caption": "Thả kiểu nhung nhớ...",
-                "comments": 34,
-                "likes": "2.6K",
-                "views": "56.4K",
-                "shares": 127,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 13,
-                "url": "https://www.tiktok.com/@user/video/1",
-                "caption": "Hãy bảo vệ cảm xúc của bạn...",
-                "comments": 8,
-                "likes": "494",
-                "views": "9.7K",
-                "shares": 30,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 14,
-                "url": "https://www.tiktok.com/@user/video/2",
-                "caption": "Con người khó tính nhất...",
-                "comments": 2,
-                "likes": "321",
-                "views": "5.2K",
-                "shares": 21,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 15,
-                "url": "https://www.tiktok.com/@user/video/3",
-                "caption": "Tâm bất định, không làm...",
-                "comments": 45,
-                "likes": "3.4K",
-                "views": "37.8K",
-                "shares": 151,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 16,
-                "url": "https://www.tiktok.com/@user/video/4",
-                "caption": "Sự tại nhân vi, mạc oán...",
-                "comments": 62,
-                "likes": "4.0K",
-                "views": "37.7K",
-                "shares": 232,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 17,
-                "url": "https://www.tiktok.com/@user/video/5",
-                "caption": "Phong cảnh hữu tình...",
-                "comments": 7,
-                "likes": "141",
-                "views": "2.7K",
-                "shares": 2,
-                "status": "Sẵn sàng",
-            },
-            {
-                "id": 18,
-                "url": "https://www.tiktok.com/@user/video/62534523535532535353453255",
-                "caption": "Thả kiểu nhung nhớ...",
-                "comments": 34,
-                "likes": "2.6K",
-                "views": "56.4K",
-                "shares": 127,
-                "status": "Sẵn sàng",
-            },
-        ]
-
-        batch_size = random.randint(5, 6)
-
-        for i in range(0, len(items), batch_size):
-            batch = items[i:i + batch_size]
-
-            # mô phỏng loading delay
-            delay = max(0.1, random.gauss(1, 0.5))
-            time.sleep(delay)
-
-            yield json.dumps(batch, ensure_ascii=False) + "\n"
-
-    return Response(stream_with_context(load_video_data()), mimetype="application/x-ndjson")
-
 
 @app.route('/api/load_videos_by_list', methods=['POST'])
 def load_videos_by_list():
@@ -694,23 +450,12 @@ def load_videos_by_list():
     
     return Response(stream_with_context(load_video_data()), mimetype="application/x-ndjson")
 
-@app.route('/api/get_playlist_session', methods=['GET'])
-def get_playlist_session():
-    """Get the current playlist session data"""
-    global playlist_session
-    return jsonify({
-        'total': len(playlist_session),
-        'videos': playlist_session
-    })
-
-
 @app.route('/api/download_videos', methods=['POST'])
 def download_videos():
     """Start download and return download_id"""
     global playlist_session
     try:
         data = request.get_json()
-        print(data)
         video_urls = data.get('video_urls', [])
         save_path = data.get('save_path', str(DOWNLOAD_FOLDER))
         quality = data.get('quality', 'Cao nhất')
@@ -719,30 +464,23 @@ def download_videos():
         if not video_urls:
             return jsonify({'error': 'No video URLs provided'}), 400
         
-        print(f"[DOWNLOAD] Received {len(video_urls)} URLs to download:")
         items=[]
         for i, url in enumerate(video_urls, 1):
-            print(f"  {i}. {url}")
             item = playlist_session[url]
             item['save_path'] = save_path
             item['quality'] = quality
             items.append(item)
-        # print(items)
-        # Generate unique download ID
+
         download_id = str(uuid.uuid4())
         
-        # Create event queue for this download
         download_queues[download_id] = Queue()
         
-        # Initialize task state
         download_tasks[download_id] = {
             'status': 'started',
             'total': len(video_urls),
             'completed': 0,
             'videos': {}
         }
-        
-        # Start download in background thread
         thread = threading.Thread(
             target=run_async_downloads,
             args=(download_id, items, concurrent_downloads)
@@ -765,10 +503,6 @@ def emit_progress(download_id, data):
     """Emit progress event to SSE queue"""
     if download_id in download_queues:
         download_queues[download_id].put(data)
-        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [EMIT] {data.get('type', 'unknown')}: {data.get('url', 'N/A')[:50]}")
-    else:
-        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [EMIT ERROR] download_id {download_id} not in queues!")
-
 
 def run_async_downloads(download_id, items, concurrent_downloads):
     """Wrapper to run async downloads in background thread"""
@@ -777,18 +511,13 @@ def run_async_downloads(download_id, items, concurrent_downloads):
     asyncio.set_event_loop(loop)
     
     try:
-        # Send initial started event
         emit_progress(download_id, {
             'type': 'started',
             'total': len(items)
         })
-        # Run the async download function
-        results = loop.run_until_complete(
+        loop.run_until_complete(
             download_multiple_videos(download_id, items, concurrent_downloads)
         )
-        
-        # Note: completion event is sent inside download_multiple_videos
-        
     except Exception as e:
         print(f"Error in run_async_downloads: {e}")
         emit_progress(download_id, {
@@ -798,69 +527,6 @@ def run_async_downloads(download_id, items, concurrent_downloads):
     finally:
         loop.close()
         download_stopped.set()
-
-
-
-def process_downloads_fake(download_id, video_urls, save_path, quality, concurrent_downloads):
-    """Process downloads with FAKE data for demonstration"""
-    try:
-        # Send initial event
-        emit_progress(download_id, {
-            'type': 'started',
-            'total': len(video_urls)
-        })
-        
-        # Simulate processing each video
-        for idx, url in enumerate(video_urls):
-            # Simulate download time (1-3 seconds per video)
-            time.sleep(random.uniform(1, 3))
-            
-            # Randomly decide success or failure (90% success rate)
-            is_success = random.random() < 0.9
-            
-            if is_success:
-                result = {
-                    'status': 'success',
-                    'filename': f'video_{idx + 1}.mp4',
-                    'title': f'Video {idx + 1}',
-                    'url': url
-                }
-            else:
-                result = {
-                    'status': 'error',
-                    'message': 'Simulated download error',
-                    'url': url
-                }
-            
-            # Update task state
-            download_tasks[download_id]['completed'] += 1
-            download_tasks[download_id]['videos'][url] = result
-            
-            # Emit progress event
-            emit_progress(download_id, {
-                'type': 'progress',
-                'url': url,
-                'status': result['status'],
-                'message': result.get('message', ''),
-                'filename': result.get('filename', ''),
-                'completed': download_tasks[download_id]['completed'],
-                'total': download_tasks[download_id]['total']
-            })
-
-        # Send completion event
-        download_tasks[download_id]['status'] = 'completed'
-        emit_progress(download_id, {
-            'type': 'completed',
-            'total': download_tasks[download_id]['total'],
-            'completed': download_tasks[download_id]['completed']
-        })
-
-    except Exception as e:
-        emit_progress(download_id, {
-            'type': 'error',
-            'error': str(e)
-        })
-
 
 @app.route('/api/download_progress/<download_id>', methods=['GET'])
 def download_progress(download_id):
@@ -874,21 +540,13 @@ def download_progress(download_id):
         
         while True:
             try:
-                # Get event from queue (blocking with timeout)
                 event = queue.get(timeout=30)
-                
-                # Send event to client
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                
-                # If completed or error, close stream
                 if event.get('type') in ['completed', 'error']:
-                    # Cleanup
                     if download_id in download_queues:
                         del download_queues[download_id]
                     break
-                    
             except:
-                # Timeout - send keepalive
                 yield f": keepalive\n\n"
     
     return Response(
@@ -915,91 +573,14 @@ def api_download_stop():
         response = jsonify({'error': str(e)})
         return response, 500
 
-
-@app.route('/download', methods=['POST'])
-def download():
-    """Handle download request."""
-    try:
-        data = request.get_json()
-        urls = data.get('urls', [])
-
-        
-        if not urls:
-            return jsonify({"error": "Không có URL nào được cung cấp"}), 400
-        
-        urls = [url.strip() for url in urls if url.strip()]
-        
-        if not urls:
-            return jsonify({"error": "Tất cả URLs đều rỗng"}), 400
-        
-        group_urls = classify_urls(urls)
-
-        error_count_total = 0
-        for group in group_urls:
-            temp = group[0]
-            if temp['type'] == 'channel':
-                if temp['platform'] == "tiktok":
-                    error_count_total += 1
-                    continue
-                    try:
-                        resp = requests.get("https://api.douyin.wtf/api/tiktok/web/get_sec_user_id?url=https://www.tiktok.com/@hoangthachthao_")
-                        secUid = resp.json()['data']
-                    except Exception as e:
-                        print(e)
-                        continue
-                elif temp['platform'] == "douyin":
-                    urls = load_list_video_from_channel_douyin(temp['sec_user_id'])
-                else:
-                    error_count_total += 1
-                    continue
-                
-            else:
-                urls = group
-
-            # Run async download
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            results = loop.run_until_complete(download_multiple_videos(urls))
-            loop.close()
-            
-            # Count successes and failures
-            success_count = sum(1 for r in results if r['status'] == 'success')
-            error_count = len(results) - success_count
-
-        return jsonify({
-            "status": "completed",
-            "total": len(results),
-            "success": success_count,
-            "errors": error_count_total + error_count,
-            "results": results
-        })
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
     """Shutdown the server."""
     func = request.environ.get('werkzeug.server.shutdown')
     if func is None:
-        # If running with other server or pyinstaller
         os._exit(0)
     func()
     return 'Server shutting down...'
-
-
-def load_list_video_from_channel_douyin(sec_user_id: str) -> list:
-    rs = []
-    try:
-        resp = requests.get(f"https://api.douyin.wtf/api/douyin/web/fetch_user_post_videos?sec_user_id={sec_user_id}&max_cursor=0&count=100")
-        resp.raise_for_status()
-        datas = resp.json()['data']
-        for aweme in datas['aweme_list']:
-            rs.append({'url': f"https://www.douyin.com/video/{aweme['aweme_id']}", 'platform': 'douyin', 'type': 'video'})
-    except Exception as e:
-        print(e)
-    return rs
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

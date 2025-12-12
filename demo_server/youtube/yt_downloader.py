@@ -105,9 +105,9 @@ class YouTubeDownloader:
                             }
                             video_urls.append(item)
                             count += 1
-                    print(f"      Tìm thấy {count} {tab_name}.")
+                    print(f"Tìm thấy {count} {tab_name}.")
             except Exception as ex:
-                print(f"      Lỗi khi quét {tab_name}: {ex}")
+                print(f"Lỗi khi quét {tab_name}: {ex}")
 
         extract_from_tab(f"{self.channel_url}/videos", "Videos")
         extract_from_tab(f"{self.channel_url}/shorts", "Shorts")
