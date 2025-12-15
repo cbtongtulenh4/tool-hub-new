@@ -22,8 +22,19 @@ import random
 from datetime import datetime
 
 
-app = Flask(__name__, static_folder='static', static_url_path='')
+if getattr(sys, 'frozen', False):
+    template_folder = os.path.join(sys._MEIPASS, 'static')
+    static_folder = os.path.join(sys._MEIPASS, 'static')
+    app = Flask(__name__, static_folder=static_folder, static_url_path='')
+else:
+    app = Flask(__name__, static_folder='static', static_url_path='')
+    
 CORS(app)
+
+@app.route('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
+
 
 
 # Create media_download folder if it doesn't exist
@@ -37,6 +48,7 @@ download_queues = {}  # {download_id: Queue for SSE events}
 playlist_session = []
 download_stopped = threading.Event()
 download_stopped.set()
+cancel_requested = threading.Event() # New event for cancellation request
 
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename to remove invalid characters."""
@@ -112,7 +124,7 @@ async def download_single_video(item, index: int) -> dict:
             "status": "Cancelled",
             "message": "cancel download"
         }
-        if download_stopped.is_set():
+        if cancel_requested.is_set():
             return resp_cancel
         url = item['url']
         platform = item['platform']
@@ -125,7 +137,7 @@ async def download_single_video(item, index: int) -> dict:
 
         if platform == "youtube":
             # Wrap sync YouTube downloader in async to prevent blocking
-            if download_stopped.is_set():
+            if cancel_requested.is_set():
                 return resp_cancel
             downloader = YouTubeDownloader(url, item['save_path'], 0, ffmpeg_path=FFMPEG_PATH)
             await asyncio.to_thread(downloader.download_worker, url)
@@ -149,7 +161,7 @@ async def download_single_video(item, index: int) -> dict:
         cnt = result.get("cnt", 0)
         medias = result.get("medias", [])
         
-        if download_stopped.is_set():
+        if cancel_requested.is_set():
             return resp_cancel
 
         if not medias:
@@ -180,6 +192,8 @@ async def download_single_video(item, index: int) -> dict:
                         response.raise_for_status()
                         with open(filepath, "wb") as f:
                             async for chunk in response.aiter_bytes(chunk_size=1024*1024): 
+                                if cancel_requested.is_set():
+                                    return resp_cancel
                                 f.write(chunk)
                 return {
                     "url": url,
@@ -196,6 +210,8 @@ async def download_single_video(item, index: int) -> dict:
 
                     async with aiofiles.open(filepath, "wb") as f:
                         async for chunk in response.aiter_bytes(chunk_size=4 * 1024 * 1024):  # 4MB
+                            if cancel_requested.is_set():
+                                return resp_cancel
                             await f.write(chunk)
             return {
                 "url": url,
@@ -217,6 +233,8 @@ async def download_single_video(item, index: int) -> dict:
 
                     async with aiofiles.open(filepath, "wb") as f:
                         async for chunk in response.aiter_bytes(chunk_size=4 * 1024 * 1024):  # 4MB
+                            if cancel_requested.is_set():
+                                return resp_cancel
                             await f.write(chunk)
             audio_media = medias[1]
             audio_url = audio_media.get("url")
@@ -229,6 +247,8 @@ async def download_single_video(item, index: int) -> dict:
 
                     async with aiofiles.open(audio_filepath, "wb") as f:
                         async for chunk in response.aiter_bytes(chunk_size=4 * 1024 * 1024):  # 4MB
+                            if cancel_requested.is_set():
+                                return resp_cancel
                             await f.write(chunk)
 
 
@@ -254,6 +274,12 @@ async def download_multiple_videos(download_id: str, items: list, concurrent_dow
     
     async def download_with_limit(item, idx):
         """Wrapper function that respects semaphore limit"""
+        if cancel_requested.is_set():
+             return {
+                "url": item['url'],
+                "status": "Cancelled",
+                "message": "cancel download"
+            }
         async with semaphore:  # Chỉ cho phép N tasks vào đây cùng lúc
             try:
                 result = await download_single_video(item, idx)
@@ -305,9 +331,9 @@ def choose_directory():
 
     try:
         cmd = [
-            sys.executable, 
-            "-c", 
-            "import tkinter as tk; from tkinter import filedialog; root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True); print(filedialog.askdirectory()); root.destroy()"
+            "powershell",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.ShowDialog() | Out-Null; $f.SelectedPath"
         ]
         
         result = subprocess.run(
@@ -341,7 +367,7 @@ def load_videos_by_user():
         playlist_session = {}
         data = request.get_json()
         user_url = data.get('channel_url', '')
-    
+        platform = data.get('platform', '')
         if not user_url:
             error_message = {
             	"error": True,
@@ -351,17 +377,38 @@ def load_videos_by_user():
             yield json.dumps(error_message, ensure_ascii=False) + "\n"
             return
 
-        group_urls = classify_urls([user_url])
-        group = group_urls[0]
-        temp = group[0]
+        # group_urls = classify_urls([user_url])
+        # group = group_urls[0]
+        # temp = group[0]
         items = []
-        if temp['type'] == 'channel':
-            if temp['platform'] == "tiktok" or temp['platform'] == "douyin":
-                scraper = DouyinTiktokScraper()
-                if temp['platform'] == "douyin":
-                    items = asyncio.run(scraper.douyin_fetch_user_post_videos(sec_user_id=temp['sec_user_id'], max_cursor=0, count=50))  
-            elif temp['platform'] == "youtube":
-                items = YouTubeDownloader(temp['url'], "", 0, FFMPEG_PATH).get_channel_videos()
+        # if temp['type'] == 'channel':
+        #     if temp['platform'] == "tiktok" or temp['platform'] == "douyin":
+        #         scraper = DouyinTiktokScraper()
+        #         if temp['platform'] == "douyin":
+        #             items = asyncio.run(scraper.douyin_fetch_user_post_videos(sec_user_id=temp['sec_user_id'], max_cursor=0, count=50))  
+        #         elif temp['platform'] == "tiktok":
+        #             items = asyncio.run(scraper.tiktok_fetch_user_post_videos(temp['url']))
+        #     elif temp['platform'] == "youtube":
+        #         items = YouTubeDownloader(temp['url'], "", 0, FFMPEG_PATH).get_channel_videos()
+        if platform == "tiktok" or platform == "douyin":
+            scraper = DouyinTiktokScraper()
+            if platform == "douyin":
+                group_urls = classify_urls([user_url])
+                group = group_urls[0]
+                temp = group[0]
+                items = asyncio.run(scraper.douyin_fetch_user_post_videos(sec_user_id=temp['sec_user_id'], max_cursor=0, count=50))  
+            elif platform == "tiktok":
+                items = asyncio.run(scraper.tiktok_fetch_user_post_videos(user_url))
+        elif platform == "youtube":
+            items = YouTubeDownloader(user_url, "", 0, FFMPEG_PATH).get_channel_videos()
+        if not items:
+            error_message = {
+             "error": True,
+             "message": "Không tìm thấy video",
+             "status": 400
+            }
+            yield json.dumps(error_message, ensure_ascii=False) + "\n"
+            return
         i = 1
         temp1 = []
         check_duplicate = []
@@ -507,6 +554,7 @@ def emit_progress(download_id, data):
 def run_async_downloads(download_id, items, concurrent_downloads):
     """Wrapper to run async downloads in background thread"""
     download_stopped.clear()
+    cancel_requested.clear()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
@@ -564,6 +612,7 @@ def api_download_stop():
     """Handle stop download request from frontend."""
     try:
         print("Waiting for downloads to stop...")
+        cancel_requested.set()
         download_stopped.wait()
         print("Downloads stopped.")
         response = jsonify({'message': 'Stop command received'})
@@ -583,5 +632,13 @@ def shutdown():
     return 'Server shutting down...'
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    def open_browser():
+        if not os.environ.get("WERKZEUG_RUN_MAIN"):
+            webbrowser.open_new('http://localhost:5000/')
+
+    threading.Timer(1, open_browser).start()
+    
+    # Disable debug mode when frozen to avoid reloader issues
+    is_frozen = getattr(sys, 'frozen', False)
+    app.run(debug=not is_frozen, port=5000)
 

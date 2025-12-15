@@ -3,7 +3,7 @@ import sys
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from yt_dlp import YoutubeDL
-sys.stdout.reconfigure(encoding="utf-8")
+# sys.stdout.reconfigure(encoding="utf-8")
 
 class YouTubeDownloader:
     _instance = None

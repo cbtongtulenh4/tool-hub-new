@@ -196,7 +196,7 @@ export function Sidebar({
             value={channelUrl}
             onChange={(e) => setChannelUrl(e.target.value)}
             className="w-full bg-black/20 border border-white/10 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all duration-300 group-hover:bg-black/30"
-            placeholder="Nhập URL kênh..."
+            placeholder="Nhập URL kênh or @username(ID)..."
           />
         </div>
 

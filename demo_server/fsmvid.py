@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 import sys
 from playwright.async_api import async_playwright
-if sys.stdout is not None:
-    sys.stdout.reconfigure(encoding="utf-8")
+# if sys.stdout is not None:
+#     sys.stdout.reconfigure(encoding="utf-8")
 import uuid
 
 FSMVID_DOWNLOAD_URL = "https://fsmvid.com/api/proxy"

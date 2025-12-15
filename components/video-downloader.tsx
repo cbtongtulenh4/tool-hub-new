@@ -1,11 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Header } from "./downloader/header"
 import { Sidebar } from "./downloader/sidebar"
 import { VideoResults } from "./downloader/video-results"
 import { DownloadOptions } from "./downloader/download-options"
 import { useToast } from '@/hooks/use-toast'
+
 interface VideoItem {
   id: number
   url: string
@@ -33,7 +34,100 @@ export function VideoDownloader() {
   const [concurrentDownloads, setConcurrentDownloads] = useState(5)
   const { toast } = useToast()
 
+  // Auto-shutdown server on tab close
+  useEffect(() => {
+    const handleUnload = () => {
+      // Use sendBeacon or fetch with keepalive to ensure request triggers even during partial unload
+      fetch('http://localhost:5000/shutdown', {
+        method: 'POST',
+        keepalive: true
+      }).catch(err => console.error("Failed to shutdown server", err));
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, []);
+
+  const urlCheck = (input: string): { url: string; platform: string } | null => {
+    const trimmedInput = input.trim()
+
+    // If no URL match, assume username/ID based on selected platform
+    if (trimmedInput.startsWith("@")) {
+      const cleanInput = trimmedInput.replace(/^@/, '')
+      let finalUrl = trimmedInput
+      if (selectedPlatform === "tiktok") {
+        finalUrl = `https://www.tiktok.com/@${cleanInput}`
+      } else if (selectedPlatform === "youtube") {
+        finalUrl = `https://www.youtube.com/@${cleanInput}`
+      } else if (selectedPlatform === "douyin") {
+        finalUrl = `https://www.douyin.com/user/${cleanInput}`
+      } else if (selectedPlatform === "facebook") {
+        finalUrl = `https://www.facebook.com/${cleanInput}`
+      }
+
+      // Update UI to show the constructed URL (optional, user might prefer keeping username)
+      // setChannelUrl(finalUrl) 
+      return { url: finalUrl, platform: selectedPlatform }
+    }
+
+
+    // Regex patterns
+    const patterns = {
+      tiktok: [
+        /^(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/@([^\/?#&]+)/,
+        /^(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/@([^\/?#&]+)\?.*$/,
+      ],
+      douyin: [
+        /^(?:https?:\/\/)?(?:www\.|m\.)?douyin\.com\/user\/([^\/?#&]+)/,
+        /^(?:https?:\/\/)?(?:www\.|m\.)?douyin\.com\/share\/user\/([^\/?#&]+)/,
+        /^(?:https?:\/\/)?v\.douyin\.com\/([^\/?#&]+)/,
+      ],
+      youtube: [
+        /^(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/channel\/([^\/?#&]+)/,
+        /^(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/@([^\/?#&]+)/,
+        /^(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/c\/([^\/?#&]+)/,
+        /^(?:https?:\/\/)?youtu\.be\/@([^\/?#&]+)/,
+      ],
+      facebook: [
+        /^(?:https?:\/\/)?(?:www\.|m\.|mbasic\.)?facebook\.com\/([^\/?#&]+)/,
+        /^(?:https?:\/\/)?(?:www\.|m\.|mbasic\.)?facebook\.com\/profile\.php\?id=([^\/?#&]+)/,
+        /^(?:https?:\/\/)?fb\.com\/([^\/?#&]+)/,
+      ]
+    }
+
+    // Check against patterns
+    for (const [platform, regexList] of Object.entries(patterns)) {
+      for (const regex of regexList) {
+        if (regex.test(trimmedInput)) {
+          setSelectedPlatform(platform)
+          setChannelUrl(trimmedInput) // Update input with full URL if it matches
+          return { url: trimmedInput, platform }
+        }
+      }
+    }
+
+    toast({
+      title: "Lỗi định dạng",
+      description: "Link không hợp lệ hoặc không được hỗ trợ",
+      variant: "destructive"
+    })
+    return null
+  }
+
   const handleStartFetch = async () => {
+    if (!channelUrl) {
+      toast({
+        title: "Lỗi",
+        description: "Vui lòng nhập link",
+        variant: "destructive"
+      })
+      return
+    }
+    const checkResult = urlCheck(channelUrl)
+    if (!checkResult) return
+
+    const { url: finalUrl, platform: platformToSend } = checkResult
+
     // Reset state before fetching
     setVideos([]);
     setSelectedVideos([]);  // Reset checkbox selections
@@ -41,10 +135,13 @@ export function VideoDownloader() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/videos/user", {
+      const response = await fetch("http://localhost:5000/api/load_videos_by_user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_url: channelUrl }),
+        body: JSON.stringify({
+          channel_url: finalUrl,
+          platform: platformToSend // Send the verified platform
+        }),
       })
 
       const reader = response.body?.getReader();
@@ -88,7 +185,14 @@ export function VideoDownloader() {
   }
 
   const handleStartFetchFromUrls = async () => {
-    if (!urlListText.trim()) return
+    if (!urlListText.trim()) {
+      toast({
+        title: "Lỗi",
+        description: "Vui lòng nhập link",
+        variant: "destructive"
+      })
+      return
+    }
 
     // Reset state before fetching
     setVideos([]);
@@ -98,7 +202,7 @@ export function VideoDownloader() {
 
 
     try {
-      const response = await fetch("/api/videos/list", {
+      const response = await fetch("http://localhost:5000/api/load_videos_by_list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls: urlListText }),
@@ -146,7 +250,7 @@ export function VideoDownloader() {
   const handleStopFetch = async () => {
     setIsStoping(true)
     try {
-      await fetch("/api/videos/load/stop", { method: "POST" })
+      await fetch("http://localhost:5000/api/download/stop", { method: "POST" })
     } catch (error) {
       console.error("Error stopping fetch:", error)
     }
@@ -171,6 +275,14 @@ export function VideoDownloader() {
     concurrentDownloads: number
   }) => {
     if (selectedVideos.length === 0) return
+    if (settings.savePath === "") {
+      toast({
+        title: "Lỗi",
+        description: "Vui lòng chọn đường dẫn lưu",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsDownloading(true)
     setTotalDownloadCount(selectedVideos.length)
@@ -202,7 +314,7 @@ export function VideoDownloader() {
 
     try {
       // Call the download API
-      const response = await fetch("/api/videos/download", {
+      const response = await fetch("http://localhost:5000/api/download_videos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -243,7 +355,7 @@ export function VideoDownloader() {
       )
 
       // Connect to SSE for progress updates
-      const eventSource = new EventSource(`/api/videos/download/progress?id=${downloadId}`)
+      const eventSource = new EventSource(`http://localhost:5000/api/download_progress/${downloadId}`)
 
       eventSource.onmessage = (event) => {
         try {
@@ -317,7 +429,7 @@ export function VideoDownloader() {
   const handleStopDownload = async () => {
     setIsStoping(true)
     try {
-      await fetch("/api/videos/download/stop", { method: "POST" })
+      await fetch("http://localhost:5000/api/download/stop", { method: "POST" })
     } catch (error) {
       console.error("Error stopping fetch:", error)
     }

@@ -6,6 +6,10 @@
 # testing
 /coverage
 
+/demo_server/build/
+/demo_server/dist/
+
+
 # next.js
 /.next/
 /out/
